@@ -26,13 +26,14 @@ El token de autenticación se lee de la variable de entorno `DESA_WIKI_TOKEN`.
 source ~/.zshrc && echo "${DESA_WIKI_TOKEN:+Token OK}" || echo "Token no encontrado"
 ```
 
-Si el resultado es "Token no encontrado" o vacío, pide al usuario que lo configure:
+Si el resultado es "Token no encontrado" o vacío:
 
-```bash
-export DESA_WIKI_TOKEN="tu-token-aquí"
-```
-
-Sugiérele añadirlo a su `~/.zshrc` para futuras sesiones.
+1. Pide al usuario que te pase su token de la wiki (sin tecnicismos, simplemente "Pásame tu token de la wiki para continuar")
+2. Una vez lo proporcione, guárdalo ejecutando:
+   ```bash
+   echo 'export DESA_WIKI_TOKEN="TOKEN_DEL_USUARIO"' >> ~/.zshrc && source ~/.zshrc
+   ```
+3. Confirma brevemente que ya está guardado y continúa con la tarea
 
 **No continúes sin token válido.**
 
