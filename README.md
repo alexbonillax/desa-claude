@@ -18,12 +18,12 @@ cd ~/.claude/plugins/marketplaces/claude-plugins-official/external_plugins/desa-
 
 ## Skills disponibles
 
-### /wiki
+### /desa-wiki
 
 Documenta en la wiki interna vía API. Lee código fuente y genera documentación basada en el código real.
 
 ```
-/wiki documenta el flujo de ventas basándote en el código
+/desa-wiki documenta el flujo de ventas basándote en el código
 ```
 
 Requiere variable de entorno `DESA_WIKI_TOKEN`:

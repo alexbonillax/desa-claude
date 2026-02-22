@@ -1,6 +1,6 @@
 ---
-name: wiki
-description: Documentar en la wiki interna de Grupo Desa. Usar cuando el usuario pida documentar procesos, sistemas o cualquier contenido en la wiki. Invocable con /wiki.
+name: desa-wiki
+description: Documentar en la wiki interna de Grupo Desa. Usar cuando el usuario pida documentar procesos, sistemas o cualquier contenido en la wiki. Invocable con /desa-wiki.
 tools: Bash, Read, Grep, Glob
 ---
 
