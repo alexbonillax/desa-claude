@@ -18,30 +18,31 @@ Si un POST devuelve error 403 o similar, informa al usuario de que no tiene perm
 
 ## Configuración
 
-El token de autenticación se lee de la variable de entorno `DESA_WIKI_TOKEN`.
-
-**Antes de cualquier llamada a la API**, ejecuta este comando para cargar el token:
+**Antes de cualquier llamada a la API**, extrae el token de `~/.zshrc`:
 
 ```bash
-source ~/.zshrc && echo "${DESA_WIKI_TOKEN:+Token OK}" || echo "Token no encontrado"
+grep DESA_WIKI_TOKEN ~/.zshrc | tail -1 | sed 's/.*="//' | sed 's/"//'
 ```
 
-Si el resultado es "Token no encontrado" o vacío:
+Guarda el valor resultante y úsalo directamente en todas las llamadas curl como `Bearer TOKEN`.
 
-1. Pide al usuario que te pase su token de la wiki (sin tecnicismos, simplemente "Pásame tu token de la wiki para continuar")
+Si el resultado está vacío (no hay token guardado):
+
+1. Pide al usuario que te pase su token de la wiki (simplemente "Pásame tu token de la wiki para continuar")
 2. Una vez lo proporcione, guárdalo ejecutando:
    ```bash
-   echo 'export DESA_WIKI_TOKEN="TOKEN_DEL_USUARIO"' >> ~/.zshrc && source ~/.zshrc
+   echo 'export DESA_WIKI_TOKEN="TOKEN_DEL_USUARIO"' >> ~/.zshrc
    ```
-3. Confirma brevemente que ya está guardado y continúa con la tarea
+3. Usa ese token directamente en las llamadas curl de esta sesión
 
 **No continúes sin token válido.**
 
 ## API
 
 - **Base URL**: `https://api2.grupodesa.app` (sin prefijo `/api/`)
-- **Auth**: `Authorization: Bearer $DESA_WIKI_TOKEN`
+- **Auth**: `Authorization: Bearer TOKEN` (el token extraído de ~/.zshrc)
 - **curl**: Usar siempre `-g` para evitar problemas con corchetes en URLs
+- **Importante**: No usar `$DESA_WIKI_TOKEN` en curl. Las variables de entorno no persisten entre llamadas. Siempre pegar el token directamente en el comando curl
 
 ### Endpoints de lectura
 
