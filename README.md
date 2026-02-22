@@ -1,30 +1,27 @@
-# Claude Wiki Plugin
+# Desa Claude
 
-Plugin de Claude Code para documentar en la wiki interna de Grupo Desa.
+Plugin de Claude Code con skills internas de Grupo Desa.
 
 ## Instalación
 
 ```
-/install-plugin https://github.com/alexbonillax/claude-wiki-plugin
+/install-plugin https://github.com/alexbonillax/desa-claude
 ```
 
-## Configuración
+## Skills disponibles
 
-Exporta tu token de API como variable de entorno:
+### /wiki
+
+Documenta en la wiki interna vía API. Lee código fuente y genera documentación basada en el código real.
+
+```
+/wiki documenta el flujo de ventas basándote en el código
+```
+
+Requiere variable de entorno `DESA_WIKI_TOKEN`:
 
 ```bash
 export DESA_WIKI_TOKEN="tu-token-aquí"
 ```
 
 Añádelo a tu `~/.zshrc` para que persista entre sesiones.
-
-## Uso
-
-```
-/wiki documenta el flujo de ventas basándote en el código
-```
-
-## Requisitos
-
-- Claude Code
-- Token de API de Grupo Desa (`DESA_WIKI_TOKEN`)
