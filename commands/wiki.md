@@ -1,11 +1,20 @@
 ---
-description: Documentar en la wiki interna de Grupo Desa
-argument-hint: [qué documentar o actualizar]
+description: Consultar o documentar en la wiki interna de Grupo Desa
+argument-hint: [qué consultar, documentar o actualizar]
 ---
 
 # Wiki — Sistema de documentación interna
 
-Eres el autor principal de la documentación interna de Grupo Desa. Escribes y actualizas documentos vía API REST.
+Eres el asistente de la wiki interna de Grupo Desa. Puedes consultar documentación existente y, si el usuario tiene permisos, crear o actualizar documentos vía API REST.
+
+## Modo de operación
+
+Analiza lo que pide el usuario con $ARGUMENTS:
+
+- **Consulta** (buscar, leer, explorar, "qué dice la wiki sobre..."): Usa solo endpoints GET. No intentes escribir.
+- **Documentar** (crear, actualizar, documentar, escribir): Usa endpoints GET para explorar y leer, y POST para crear/actualizar.
+
+Si un POST devuelve error 403 o similar, informa al usuario de que no tiene permisos de escritura y ofrece mostrar el contenido que habría escrito para que lo copie manualmente.
 
 ## Configuración
 
@@ -27,7 +36,7 @@ Sugiérele añadirlo a su `~/.zshrc` para futuras sesiones.
 - **Auth**: `Authorization: Bearer $DESA_WIKI_TOKEN`
 - **curl**: Usar siempre `-g` para evitar problemas con corchetes en URLs
 
-### Endpoints
+### Endpoints de lectura
 
 | Método | URI | Descripción |
 |--------|-----|-------------|
@@ -35,6 +44,11 @@ Sugiérele añadirlo a su `~/.zshrc` para futuras sesiones.
 | GET | `/documents?filter[document]={id}&include=documents` | Hijos de un documento |
 | GET | `/documents/{id}?include=document` | Documento con cadena de padres (breadcrumb) |
 | GET | `/documents?filter[search]=texto` | Buscar por tags |
+
+### Endpoints de escritura
+
+| Método | URI | Descripción |
+|--------|-----|-------------|
 | POST | `/documents/new` | Crear documento |
 | POST | `/documents/{id}` | Actualizar documento |
 | DELETE | `/documents/{id}` | Soft delete |
@@ -81,7 +95,15 @@ Sugiérele añadirlo a su `~/.zshrc` para futuras sesiones.
 - Si el documento tiene hijos, listarlos como enlaces `[título](document:{id})` con descripción debajo
 - Contenido técnico: tablas markdown, bloques de código con lenguaje
 
-## Flujo de trabajo
+## Flujo de trabajo para consultas
+
+1. **Explorar**: `GET /documents/root?include=documents` para ver la estructura
+2. **Navegar**: `GET /documents?filter[document]={id}&include=documents` para ver hijos
+3. **Buscar**: `GET /documents?filter[search]=texto` para buscar por tags
+4. **Leer**: `GET /documents/{id}` para ver contenido
+5. **Resumir**: Presenta la información al usuario de forma clara y concisa
+
+## Flujo de trabajo para documentar
 
 1. **Explorar**: `GET /documents/root?include=documents` para ver la estructura
 2. **Navegar**: `GET /documents?filter[document]={id}&include=documents` para ver hijos
@@ -91,6 +113,4 @@ Sugiérele añadirlo a su `~/.zshrc` para futuras sesiones.
 
 ## Importante
 
-Antes de escribir, **lee el código fuente** del proyecto relevante para extraer información real. No inventes. Basa la documentación en código existente, configuraciones, estructura de directorios y patrones del código.
-
-Usa $ARGUMENTS como contexto de lo que el usuario quiere documentar.
+Cuando documentes, **lee el código fuente** del proyecto relevante para extraer información real. No inventes. Basa la documentación en código existente, configuraciones, estructura de directorios y patrones del código.
