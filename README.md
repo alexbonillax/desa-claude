@@ -19,6 +19,14 @@ Reiniciar Claude Code después de instalar.
 /plugin marketplace update desa
 ```
 
+Si no se actualiza, borrar el cache y reinstalar:
+
+```bash
+rm -rf ~/.claude/plugins/cache/desa
+```
+
+Y luego en Claude Code: `/plugin install desa@desa`
+
 ## Comandos disponibles
 
 ### /desa:wiki
@@ -27,12 +35,7 @@ Consulta o documenta en la wiki interna vía API. Lee código fuente y genera do
 
 ```
 /desa:wiki documenta el flujo de ventas basándote en el código
+/desa:wiki qué dice la wiki sobre pedidos
 ```
 
-Requiere variable de entorno `DESA_WIKI_TOKEN`:
-
-```bash
-export DESA_WIKI_TOKEN="tu-token-aquí"
-```
-
-Añádelo a tu `~/.zshrc` para que persista entre sesiones.
+El token se guarda automáticamente en `~/.claude/settings.json`. La primera vez que uses el comando, te pedirá el token y lo guardará para futuras sesiones.
