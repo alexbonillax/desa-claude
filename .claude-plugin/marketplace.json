@@ -14,8 +14,8 @@
         "name": "Grupo Desa"
       },
       "source": {
-        "source": "github",
-        "repo": "alexbonillax/desa-claude"
+        "source": "url",
+        "url": "https://github.com/alexbonillax/desa-claude.git"
       }
     }
   ]
