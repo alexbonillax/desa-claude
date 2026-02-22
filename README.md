@@ -4,8 +4,16 @@ Plugin de Claude Code con skills internas de Grupo Desa.
 
 ## Instalación
 
+```bash
+git clone https://github.com/alexbonillax/desa-claude.git ~/.claude/plugins/marketplaces/claude-plugins-official/external_plugins/desa-claude
 ```
-/install-plugin https://github.com/alexbonillax/desa-claude
+
+Reiniciar Claude Code después de instalar.
+
+## Actualización
+
+```bash
+cd ~/.claude/plugins/marketplaces/claude-plugins-official/external_plugins/desa-claude && git pull
 ```
 
 ## Skills disponibles
