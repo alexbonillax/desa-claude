@@ -50,6 +50,7 @@ Sugiérele añadirlo a su `~/.zshrc` para futuras sesiones.
   "fields": {
     "document_id": 5,
     "title": "Nombre del documento",
+    "description": "Breve resumen de lo que contiene la página",
     "content": "Contenido en markdown...",
     "is_published": true
   },
@@ -59,6 +60,7 @@ Sugiérele añadirlo a su `~/.zshrc` para futuras sesiones.
 ```
 
 - `document_id`: ID del padre (obligatorio)
+- `description`: resumen breve del contenido (max 255 caracteres). Siempre rellenarlo
 - `content`: markdown libre, puede ser null
 - `teams: []` y `roles: []` → documento público para todos los empleados
 - Root (id=1) NO se puede editar vía API
