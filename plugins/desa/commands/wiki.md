@@ -90,7 +90,7 @@ Si el resultado es "Token no encontrado" o vacío:
 
 - Markdown estándar
 - **No incluir el título** en el content (ya está en `fields.title`)
-- Idioma: **español**
+- Idioma: **español de España**. Usar acentos correctos, ortografía impecable. Revisar tildes en palabras como gestión, información, configuración, autenticación, etc. No usar modismos latinoamericanos
 - Enlaces entre documentos: `[título visible](document:{id})`
 - No usar emojis
 
