@@ -2,34 +2,35 @@
 
 Plugin de Claude Code con skills internas de Grupo Desa.
 
-## Instalación
+## Instalacion
 
 ```bash
-git clone https://github.com/alexbonillax/desa-claude.git ~/.claude/plugins/marketplaces/claude-plugins-official/external_plugins/desa-claude
+/plugin marketplace add alexbonillax/desa-claude
+/plugin install desa@desa
 ```
 
-Reiniciar Claude Code después de instalar.
+Reiniciar Claude Code despues de instalar.
 
-## Actualización
+## Actualizacion
 
 ```bash
-cd ~/.claude/plugins/marketplaces/claude-plugins-official/external_plugins/desa-claude && git pull
+/plugin marketplace update desa
 ```
 
-## Skills disponibles
+## Comandos disponibles
 
-### /desa-wiki
+### /desa:wiki
 
-Documenta en la wiki interna vía API. Lee código fuente y genera documentación basada en el código real.
+Documenta en la wiki interna via API. Lee codigo fuente y genera documentacion basada en el codigo real.
 
 ```
-/desa-wiki documenta el flujo de ventas basándote en el código
+/desa:wiki documenta el flujo de ventas basandote en el codigo
 ```
 
 Requiere variable de entorno `DESA_WIKI_TOKEN`:
 
 ```bash
-export DESA_WIKI_TOKEN="tu-token-aquí"
+export DESA_WIKI_TOKEN="tu-token-aqui"
 ```
 
-Añádelo a tu `~/.zshrc` para que persista entre sesiones.
+Anadelo a tu `~/.zshrc` para que persista entre sesiones.
