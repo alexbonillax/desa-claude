@@ -2,7 +2,7 @@
 
 Plugin de Claude Code con skills internas de Grupo Desa.
 
-## Instalacion
+## Instalación
 
 Desde Claude Code:
 
@@ -11,9 +11,9 @@ Desde Claude Code:
 /plugin install desa@desa
 ```
 
-Reiniciar Claude Code despues de instalar.
+Reiniciar Claude Code después de instalar.
 
-## Actualizacion
+## Actualización
 
 ```
 /plugin marketplace update desa
@@ -23,16 +23,16 @@ Reiniciar Claude Code despues de instalar.
 
 ### /desa:wiki
 
-Documenta en la wiki interna via API. Lee codigo fuente y genera documentacion basada en el codigo real.
+Consulta o documenta en la wiki interna vía API. Lee código fuente y genera documentación basada en el código real.
 
 ```
-/desa:wiki documenta el flujo de ventas basandote en el codigo
+/desa:wiki documenta el flujo de ventas basándote en el código
 ```
 
 Requiere variable de entorno `DESA_WIKI_TOKEN`:
 
 ```bash
-export DESA_WIKI_TOKEN="tu-token-aqui"
+export DESA_WIKI_TOKEN="tu-token-aquí"
 ```
 
-Anadelo a tu `~/.zshrc` para que persista entre sesiones.
+Añádelo a tu `~/.zshrc` para que persista entre sesiones.

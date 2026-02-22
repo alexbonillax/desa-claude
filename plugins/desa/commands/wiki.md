@@ -29,9 +29,9 @@ Guarda el valor resultante y úsalo directamente en todas las llamadas curl como
 Si el resultado está vacío (no hay token guardado):
 
 1. Pide al usuario que te pase su token de la wiki (simplemente "Pásame tu token de la wiki para continuar")
-2. Una vez lo proporcione, guárdalo ejecutando:
+2. Una vez lo proporcione, guárdalo ejecutando (reemplaza si ya existía):
    ```bash
-   echo 'export DESA_WIKI_TOKEN="TOKEN_DEL_USUARIO"' >> ~/.zshrc
+   sed -i '' '/DESA_WIKI_TOKEN/d' ~/.zshrc && echo 'export DESA_WIKI_TOKEN="TOKEN_DEL_USUARIO"' >> ~/.zshrc
    ```
 3. Usa ese token directamente en las llamadas curl de esta sesión
 
