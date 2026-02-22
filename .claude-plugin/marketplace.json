@@ -1,13 +1,13 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "desa-claude",
+  "name": "desa",
   "description": "Skills internas de Grupo Desa para Claude Code",
   "owner": {
     "name": "Grupo Desa"
   },
   "plugins": [
     {
-      "name": "desa-claude",
+      "name": "desa",
       "description": "Skills internas de Grupo Desa para Claude Code",
       "version": "0.1.0",
       "author": {
