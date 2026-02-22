@@ -119,6 +119,66 @@ Si el resultado está vacío (no hay token guardado):
 4. **Escribir**: `POST /documents/new` para crear o `POST /documents/{id}` para actualizar
 5. **Verificar**: `GET /documents/{id}` para confirmar
 
+## Estructura de la wiki
+
+La wiki tiene dos ejes principales:
+
+### Eje de negocio (cómo funciona la empresa)
+
+```
+Wiki (1)
+├── General (2)
+├── Flujo de Ventas (3) → Marketing, Ventas, SAC, Centro Logístico, Transporte, Devoluciones
+├── Flujo de Aprovisionamiento (4) → Producto, Proveedor, Compras, Planificación, Transporte
+└── Capa Digital (5) → Sistemas, Herramientas, Apps, Datos, Analítica
+```
+
+### Eje técnico (cómo funciona el sistema)
+
+Cada aplicación bajo Capa Digital puede tener su propia sección de Lógica de Negocio. Ejemplo actual:
+
+```
+Desaverse Backend (27)
+├── Documentación Técnica
+│   └── Kernel (28) → Middleware, Tareas, Errores, Providers
+└── Lógica de Negocio (33) → Reglas del sistema en lenguaje no técnico
+    └── Pedidos (34)
+    └── ... (futuros dominios)
+```
+
+Otras aplicaciones (Desaverse Frontend, Desa Connect, etc.) pueden seguir el mismo patrón cuando tengan lógica de negocio propia que documentar.
+
+### Referencias cruzadas
+
+La documentación de lógica de negocio vive bajo la **aplicación correspondiente > Lógica de Negocio** (fuente de verdad), pero debe enlazarse desde las páginas del eje de negocio para que perfiles no técnicos la encuentren.
+
+**Al crear documentación de lógica de negocio:**
+
+1. **Identificar** en qué aplicación reside la lógica (backend, frontend, Desa Connect, etc.)
+2. **Crear** la página bajo la sección Lógica de Negocio de esa aplicación, con lenguaje no técnico, sin código
+3. **Enlazar** desde la página del flujo de negocio correspondiente (Ventas, Centro Logístico, etc.)
+4. **Actualizar** la página índice de Lógica de Negocio de la aplicación con el nuevo enlace
+
+**Ejemplo**: La lógica de pedidos (id: 34) está bajo Desaverse Backend > Lógica de Negocio (id: 33), y Ventas (id: 11) la enlaza como referencia cruzada.
+
+**Al crear documentación técnica:**
+- Va bajo la sección de Documentación Técnica de la aplicación correspondiente
+- No necesita referencia cruzada desde los flujos de negocio
+
+### Formato de lógica de negocio
+
+Las páginas de Lógica de Negocio están orientadas a perfiles no técnicos (dirección, logística, comercial):
+
+- Lenguaje de negocio, sin código ni nombres de funciones
+- Explicar qué decide el sistema, por qué y en qué condiciones
+- Usar tablas para comparar opciones/modos
+- Usar ejemplos numéricos concretos cuando ayuden a entender
+- Estructura: descripción breve → separador → secciones por regla
+
+## Precaución con las actualizaciones
+
+Cuando actualices un documento existente (POST /documents/{id}), debes enviar TODOS los campos incluyendo el contenido completo. Si envías `content: null`, se borrará el contenido existente. Lee siempre el documento antes de actualizarlo para preservar su contenido.
+
 ## Importante
 
 Cuando documentes, **lee el código fuente** del proyecto relevante para extraer información real. No inventes. Basa la documentación en código existente, configuraciones, estructura de directorios y patrones del código.
