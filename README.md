@@ -4,8 +4,10 @@ Plugin de Claude Code con skills internas de Grupo Desa.
 
 ## Instalacion
 
-```bash
-/plugin marketplace add alexbonillax/desa-claude
+Desde Claude Code:
+
+```
+/plugin marketplace add https://github.com/alexbonillax/desa-claude.git
 /plugin install desa@desa
 ```
 
@@ -13,7 +15,7 @@ Reiniciar Claude Code despues de instalar.
 
 ## Actualizacion
 
-```bash
+```
 /plugin marketplace update desa
 ```
 
