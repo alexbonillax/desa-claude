@@ -13,7 +13,10 @@
       "author": {
         "name": "Grupo Desa"
       },
-      "source": "."
+      "source": {
+        "source": "github",
+        "repo": "alexbonillax/desa-claude"
+      }
     }
   ]
 }
