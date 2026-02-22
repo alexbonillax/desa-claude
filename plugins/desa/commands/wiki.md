@@ -20,18 +20,19 @@ Si un POST devuelve error 403 o similar, informa al usuario de que no tiene perm
 
 El token de autenticación se lee de la variable de entorno `DESA_WIKI_TOKEN`.
 
-Si no existe, haz lo siguiente:
+**Antes de cualquier llamada a la API**, ejecuta este comando para cargar el token:
 
-1. Pregunta al usuario su token de la wiki
-2. Una vez lo proporcione, guárdalo en `~/.zshrc` ejecutando:
-   ```bash
-   echo 'export DESA_WIKI_TOKEN="TOKEN_AQUI"' >> ~/.zshrc
-   ```
-3. Cárgalo en la sesión actual:
-   ```bash
-   export DESA_WIKI_TOKEN="TOKEN_AQUI"
-   ```
-4. Confirma al usuario que el token ha sido guardado y persistirá entre sesiones
+```bash
+source ~/.zshrc && echo "${DESA_WIKI_TOKEN:+Token OK}" || echo "Token no encontrado"
+```
+
+Si el resultado es "Token no encontrado" o vacío, pide al usuario que lo configure:
+
+```bash
+export DESA_WIKI_TOKEN="tu-token-aquí"
+```
+
+Sugiérele añadirlo a su `~/.zshrc` para futuras sesiones.
 
 **No continúes sin token válido.**
 
