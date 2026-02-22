@@ -18,10 +18,10 @@ Si un POST devuelve error 403 o similar, informa al usuario de que no tiene perm
 
 ## Configuración
 
-**Antes de cualquier llamada a la API**, extrae el token de `~/.zshrc`:
+**Antes de cualquier llamada a la API**, extrae el token de `~/.claude/settings.json`:
 
 ```bash
-grep DESA_WIKI_TOKEN ~/.zshrc | tail -1 | sed 's/.*="//' | sed 's/"//'
+python3 -c "import json; print(json.load(open('$HOME/.claude/settings.json')).get('desa_wiki_token',''))"
 ```
 
 Guarda el valor resultante y úsalo directamente en todas las llamadas curl como `Bearer TOKEN`.
@@ -29,10 +29,7 @@ Guarda el valor resultante y úsalo directamente en todas las llamadas curl como
 Si el resultado está vacío (no hay token guardado):
 
 1. Pide al usuario que te pase su token de la wiki (simplemente "Pásame tu token de la wiki para continuar")
-2. Una vez lo proporcione, guárdalo ejecutando (reemplaza si ya existía):
-   ```bash
-   sed -i '' '/DESA_WIKI_TOKEN/d' ~/.zshrc && echo 'export DESA_WIKI_TOKEN="TOKEN_DEL_USUARIO"' >> ~/.zshrc
-   ```
+2. Una vez lo proporcione, guárdalo en `~/.claude/settings.json` usando la herramienta Read para leer el fichero y luego Edit para añadir la clave `"desa_wiki_token": "TOKEN_DEL_USUARIO"` al objeto JSON raíz
 3. Usa ese token directamente en las llamadas curl de esta sesión
 
 **No continúes sin token válido.**
@@ -40,9 +37,9 @@ Si el resultado está vacío (no hay token guardado):
 ## API
 
 - **Base URL**: `https://api2.grupodesa.app` (sin prefijo `/api/`)
-- **Auth**: `Authorization: Bearer TOKEN` (el token extraído de ~/.zshrc)
+- **Auth**: `Authorization: Bearer TOKEN` (el token extraído de settings.json)
 - **curl**: Usar siempre `-g` para evitar problemas con corchetes en URLs
-- **Importante**: No usar `$DESA_WIKI_TOKEN` en curl. Las variables de entorno no persisten entre llamadas. Siempre pegar el token directamente en el comando curl
+- **Importante**: No usar variables de entorno en curl. No persisten entre llamadas. Siempre pegar el token directamente en el comando curl
 
 ### Endpoints de lectura
 
