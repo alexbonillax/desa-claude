@@ -1,7 +1,7 @@
 {
   "name": "desa",
   "description": "Skills internas de Grupo Desa para Claude Code",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "author": {
     "name": "Grupo Desa"
   }

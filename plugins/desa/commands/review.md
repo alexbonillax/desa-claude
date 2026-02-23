@@ -69,28 +69,42 @@ Analizar cada fichero modificado. Para cada posible incidencia, asignar internam
 15. **Validación de arrays** — `'field' => 'present|array'` + `'field.*' => 'required|numeric|exists:table,id'`
 16. **Include pattern** — Carga condicional via `?include=` con `in_array()` en Service
 17. **Resource pattern** — Campos condicionales via `$this->relationLoaded()` en Resource
+18. **Services devuelven response()** — `return response(new XResource($model), Response::HTTP_CREATED)`, nunca el modelo directamente
+19. **Excepciones con HTTP status** — `throw new Exception(Response::HTTP_CONFLICT)`. El status code es el mensaje de la excepción, capturado por `exceptionResponse()`
+20. **Transacciones explícitas** — Toda escritura en `DB::beginTransaction()` / `commit()` / `rollBack()` dentro de try-catch
+21. **broadcast() después de commit()** — Eventos broadcast SIEMPRE después de `DB::commit()`, nunca dentro del try antes del commit
+22. **withTrashed() en BelongsTo** — Relaciones BelongsTo deben incluir `->withTrashed()` si el modelo relacionado usa soft deletes
+23. **GetRequest para listados** — Usar `GetRequest` que centraliza parsing de `include`, `filter`, `sort`, `perPage`. No reinventar el parsing
+24. **Traits para estado** — Métodos de estado (`isEditable()`, `isDeletable()`) via trait `Entitable`, no directamente en el modelo
 
 ### Criterios frontend (React/JS)
 
-18. **Semicolons obligatorios** — En toda sentencia
-19. **className con llaves** — `className={'clase'}`, no `className="clase"`
-20. **Espaciado en items** — No `gap`/`spacing` en contenedores. Usar `mx-1`, `px-2` en hijos
-21. **Evitar sx prop** — Preferir clases CSS
-22. **No w-full** — Usar `width="100%"` como prop de MUI
-23. **Typography con variant** — Nunca estilos inline (`sx={{fontSize, fontWeight}}`)
-24. **Botones sin Typography** — Texto directo como children del Button
-25. **Props string sin llaves** — `variant="contained"`, no `variant={"contained"}`
-26. **No pasar valores por defecto** — Omitir parámetros que coincidan con el default de la función
-27. **No if/else inline** — Siempre con llaves y saltos de línea
-28. **No abreviaturas de una letra** — En `.map()`, `.filter()`, `.find()` usar nombres descriptivos (`item`, `order`), no `x`, `e`, `i`
-29. **function para features, arrow para shared** — Declaraciones de función para componentes feature, arrow functions para utilidades/shared
-30. **Hooks al inicio agrupados** — Hooks agrupados por categoría al inicio del componente. Early return después de hooks
-31. **Helpers a nivel de archivo** — Funciones auxiliares encima del componente, no dentro
-32. **i18next.t() directo** — No usar hook `useTranslation()`
-33. **FontAwesome** — Solo `fasr` (sharp regular) y `fass` (sharp solid). Nunca `fal`
-34. **ActionTypography para códigos copiables** — Nunca Typography plano para códigos de pedidos, facturas, clientes
-35. **Separar useEffects** — Un useEffect por side effect. No mezclar múltiples efectos
-36. **overflow-x: clip** — Nunca `hidden` (rompe position: sticky)
+25. **Semicolons obligatorios** — En toda sentencia
+26. **className con llaves** — `className={'clase'}`, no `className="clase"`
+27. **Espaciado en items** — No `gap`/`spacing` en contenedores. Usar `mx-1`, `px-2` en hijos
+28. **Evitar sx prop** — Preferir clases CSS
+29. **No w-full** — Usar `width="100%"` como prop de MUI
+30. **Typography con variant** — Nunca estilos inline (`sx={{fontSize, fontWeight}}`)
+31. **Botones sin Typography** — Texto directo como children del Button
+32. **Props string sin llaves** — `variant="contained"`, no `variant={"contained"}`
+33. **No pasar valores por defecto** — Omitir parámetros que coincidan con el default de la función
+34. **No if/else inline** — Siempre con llaves y saltos de línea
+35. **No abreviaturas de una letra** — En `.map()`, `.filter()`, `.find()` usar nombres descriptivos (`item`, `order`), no `x`, `e`, `i`
+36. **function para features, arrow para shared** — Declaraciones de función para componentes feature, arrow functions para utilidades/shared
+37. **Hooks al inicio agrupados** — Hooks agrupados por categoría al inicio del componente. Early return después de hooks
+38. **Helpers a nivel de archivo** — Funciones auxiliares encima del componente, no dentro
+39. **i18next.t() directo** — No usar hook `useTranslation()`
+40. **FontAwesome** — Solo `fasr` (sharp regular) y `fass` (sharp solid). Nunca `fal`
+41. **ActionTypography para códigos copiables** — Nunca Typography plano para códigos de pedidos, facturas, clientes
+42. **Separar useEffects** — Un useEffect por side effect. No mezclar múltiples efectos
+43. **overflow-x: clip** — Nunca `hidden` (rompe position: sticky)
+44. **Props destructuradas en firma** — Destructurar props en los parámetros de la función con defaults inline: `const Component = ({label, icon, className = 'py-2'})`
+45. **useCallback para handlers** — Todo event handler y función derivada debe usar `useCallback` con dependencias explícitas
+46. **memo() en componentes de tabla/lista** — Componentes de filas de tabla y items de lista envueltos en `memo()` para evitar re-renders
+47. **import * as XService** — Servicios importados como namespace: `import * as OrdersService from '...'`. Llamar como `OrdersService.list()`
+48. **Parámetros de servicio en orden** — Funciones de servicio API siempre en orden: `(id, filter, page, perPage, sort, include)`
+49. **&& para una rama, ternario para dos** — `{condition && <Component/>}` para una rama. Ternario solo cuando hay dos ramas con JSX
+50. **Callbacks al padre para save** — Componentes hijos llaman `handleOnSave` del padre. El hijo no gestiona estado de persistencia
 
 ## Paso 6: Formato de salida
 
