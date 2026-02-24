@@ -90,9 +90,54 @@ Si el resultado está vacío (no hay token guardado):
 
 - Markdown estándar
 - **No incluir el título** en el content (ya está en `fields.title`)
-- Idioma: **español de España**. Usar acentos correctos, ortografía impecable. Revisar tildes en palabras como gestión, información, configuración, autenticación, etc. No usar modismos latinoamericanos
+- Idioma: **español de España**. No usar modismos latinoamericanos
 - Enlaces entre documentos: `[título visible](document:{id})`
 - No usar emojis
+
+## Ortografía — OBLIGATORIO
+
+Todo el contenido debe estar en **español con acentos correctos**. Esto es un requisito bloqueante: no envíes ningún POST sin haber verificado la ortografía.
+
+Palabras que frecuentemente se escriben sin tilde por error:
+
+| Incorrecto | Correcto |
+|-----------|----------|
+| topologia | topología |
+| fisico/a | físico/a |
+| tuneles | túneles |
+| funcion | función |
+| publica | pública |
+| logica | lógica |
+| parametro | parámetro |
+| configuracion | configuración |
+| informacion | información |
+| gestion | gestión |
+| autenticacion | autenticación |
+| conexion | conexión |
+| operacion | operación |
+| direccion | dirección |
+| descripcion | descripción |
+| sincronizacion | sincronización |
+| documentacion | documentación |
+| numero | número |
+| codigo | código |
+| metodo | método |
+| unico/a | único/a |
+| tecnologia | tecnología |
+| logistico/a | logístico/a |
+| analisis | análisis |
+| politica | política |
+| automatico/a | automático/a |
+| vehiculo | vehículo |
+| catalogo | catálogo |
+| periodo | período |
+| almacen | almacén |
+| tambien | también |
+| asi | así |
+| mas (adverbio) | más |
+| actua | actúa |
+
+**Antes de cada POST** (crear o actualizar), revisa todo el JSON que vas a enviar y corrige cualquier palabra sin tilde. Presta especial atención a `title`, `description` y `content`. Si generas contenido largo, revísalo en bloques.
 
 ## Convenciones de contenido
 
@@ -115,8 +160,9 @@ Si el resultado está vacío (no hay token guardado):
 1. **Explorar**: `GET /documents/root?include=documents` para ver la estructura
 2. **Navegar**: `GET /documents?filter[document]={id}&include=documents` para ver hijos
 3. **Leer**: `GET /documents/{id}` para ver contenido actual
-4. **Escribir**: `POST /documents/new` para crear o `POST /documents/{id}` para actualizar
-5. **Verificar**: `GET /documents/{id}` para confirmar
+4. **Revisar ortografía**: Antes de enviar, repasa title, description y content buscando palabras sin tilde. Consulta la tabla de la sección "Ortografía" y corrige. Este paso es obligatorio
+5. **Escribir**: `POST /documents/new` para crear o `POST /documents/{id}` para actualizar
+6. **Verificar**: `GET /documents/{id}` para confirmar
 
 ## Estructura de la wiki
 
