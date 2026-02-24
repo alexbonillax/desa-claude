@@ -71,6 +71,7 @@ Si el resultado está vacío (no hay token guardado):
     "title": "Nombre del documento",
     "description": "Breve resumen de lo que contiene la página",
     "content": "Contenido en markdown...",
+    "searchable_tags": "palabra1, palabra2, palabra3",
     "is_published": true
   },
   "teams": [],
@@ -81,6 +82,7 @@ Si el resultado está vacío (no hay token guardado):
 - `document_id`: ID del padre (obligatorio)
 - `description`: resumen breve del contenido (max 255 caracteres). Siempre rellenarlo
 - `content`: markdown libre, puede ser null
+- `searchable_tags`: palabras clave separadas por coma que facilitan la búsqueda fulltext. El título se añade automáticamente, no hace falta repetirlo. Incluir: nombres de tecnologías, conceptos clave, siglas, términos de negocio relevantes. **Siempre rellenarlo** al crear o actualizar un documento
 - `teams: []` y `roles: []` → documento público para todos los empleados
 - Root (id=1) NO se puede editar vía API
 
