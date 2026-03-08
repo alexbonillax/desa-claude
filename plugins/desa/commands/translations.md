@@ -62,6 +62,7 @@ Si el resultado está vacío (no hay token guardado):
 ### Filtros (query params en GET /terms)
 
 - `filter[namespace]=app` — Filtrar por namespace
+- `filter[code]=global.save` — Coincidencia exacta por código. **Siempre combinar con `filter[namespace]`** porque el mismo code puede existir en múltiples namespaces
 - `filter[search]=guardar` — Búsqueda fulltext en searchable_tags
 - `perPage=100` — Resultados por página (usar 100 para sync)
 - `sort[by]=code&sort[dir]=asc` — Ordenar por código ascendente
@@ -116,9 +117,27 @@ Si el resultado está vacío (no hay token guardado):
 }
 ```
 
+**GET /terms/{id}** y **GET /terms?filter[code]+filter[namespace]** (term individual):
+```json
+{
+  "data": {
+    "id": 604,
+    "fields": {
+      "namespace": "app",
+      "code": "global.save",
+      "value": { "es": "Guardar", "en": "Save", "fr": "Sauvegarder", "pt": "Guardar" },
+      "created_at": "2026-03-07T06:55:09.000000Z",
+      "updated_at": "2026-03-08T08:14:44.000000Z"
+    }
+  }
+}
+```
+
+**Importante**: `filter[code]` + `filter[namespace]` devuelve `data` como **objeto** (un term), no como array. Si no encuentra coincidencia, devuelve 404. El listado paginado (`filter[search]`, sin `filter[code]`) devuelve `data` como **array** con `meta`.
+
 Notas sobre la respuesta:
 - `value` solo contiene los idiomas que tienen traducción (no incluye claves vacías)
-- Paginación: usar `meta.has_more_pages` para saber si hay más páginas
+- Paginación (solo en listados): usar `meta.has_more_pages` para saber si hay más páginas
 - El `id` del term es necesario para actualizar (`POST /terms/{id}`) y eliminar (`DELETE /terms/{id}`)
 
 ### Body para crear/actualizar (POST)
@@ -141,9 +160,23 @@ Notas sobre la respuesta:
 
 ### Ejemplos curl
 
-**Buscar**:
+**Buscar (fulltext)**:
 ```bash
 curl -s -g -X GET "https://api2.grupodesa.app/terms?filter[search]=guardar&perPage=25&sort[by]=code&sort[dir]=asc" \
+  -H "Authorization: Bearer TOKEN" \
+  -H "Accept: application/json"
+```
+
+**Buscar (exacta por code — siempre con namespace)**:
+```bash
+curl -s -g -X GET "https://api2.grupodesa.app/terms?filter[code]=global.save&filter[namespace]=app" \
+  -H "Authorization: Bearer TOKEN" \
+  -H "Accept: application/json"
+```
+
+**Obtener por ID**:
+```bash
+curl -s -g -X GET "https://api2.grupodesa.app/terms/487" \
   -H "Authorization: Bearer TOKEN" \
   -H "Accept: application/json"
 ```
@@ -283,7 +316,7 @@ Si un POST devuelve error 403, informa al usuario de que no tiene permisos. Si d
 1. Detectar proyecto
 2. Extraer token
 3. Determinar namespace: frontend → siempre `app`; backend → inferir del contexto o preguntar, default `app`
-4. **Buscar si el term ya existe**: `GET /terms?filter[namespace]={ns}&filter[search]={code}`. Revisar los resultados buscando coincidencia exacta en `fields.code`. Si existe, usar su `id` para actualizar; si no existe, crear
+4. **Buscar si el term ya existe**: `GET /terms?filter[code]={code}&filter[namespace]={ns}`. Devuelve 0 o 1 resultado. Si existe, usar su `id` para actualizar; si no existe, crear
 5. Construir el objeto `value`: incluir solo los locales con traducción conocida. No enviar cadenas vacías
 6. **Spell-check** de `value.es` contra la tabla de ortografía
 7. POST a `/terms/new` (crear) o `/terms/{id}` (actualizar con merge de valores existentes)
@@ -299,7 +332,7 @@ Para actualizar: GET `/terms/{id}` para obtener valores actuales, mergear los nu
 
 1. Detectar proyecto
 2. Extraer token
-3. Buscar el term por código: `GET /terms?filter[search]={code}` y encontrar coincidencia exacta en `fields.code` para obtener el `id`
+3. Buscar el term por código: `GET /terms?filter[code]={code}&filter[namespace]={ns}` para obtener el `id`
 4. Confirmar con el usuario antes de eliminar (mostrar code y valores actuales)
 5. `DELETE /terms/{id}`
 6. Eliminar la clave de los archivos locales si estamos en un proyecto
@@ -386,7 +419,7 @@ Usar `—` para idiomas sin traducción.
 - **API es la fuente de verdad** — sync siempre sobreescribe archivos locales completamente
 - **NUNCA tocar** auth.php, validation.php, passwords.php, pagination.php, errors.php
 - **Spell-check** obligatorio para `value.es` antes de cada POST
-- **Buscar antes de crear** — siempre verificar si el term ya existe para evitar errores de duplicado
+- **Buscar antes de crear** — usar `filter[code]` + `filter[namespace]` para verificar si el term ya existe. Nunca usar solo `filter[code]` sin namespace
 - **Error handling**: 422 → mostrar errores de validación; 403 → informar permisos insuficientes
 - **Namespace por defecto**: `app` si el usuario no especifica otro
 - **Idiomas dinámicos**: siempre obtener de `/locales`, no hardcodear. Crear directorios y archivos para todos los idiomas que tengan datos
