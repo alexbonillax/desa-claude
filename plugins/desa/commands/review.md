@@ -47,6 +47,8 @@ Solo cuando una incidencia potencial requiera verificación contra el código ex
 
 Analizar cada fichero modificado. Para cada posible incidencia, asignar internamente un nivel de confianza (0-100). **Solo reportar incidencias con confianza >= 75.**
 
+**Severidad**: Crítico para seguridad, corrupción de datos o bugs silenciosos (criterios #6, #10, #19, #22, #24, #27, #30). Importante para violaciones de patrón estructural que afectan a corrección o mantenibilidad. Menor para estilo, naming y convenciones.
+
 ### Criterios compartidos (ambos proyectos)
 
 1. **Adherencia a patrones preexistentes** — El código nuevo DEBE seguir los patrones del proyecto. Si hay duda, leer un fichero de referencia del mismo dominio para comparar
@@ -59,47 +61,65 @@ Analizar cada fichero modificado. Para cada posible incidencia, asignar internam
 ### Criterios backend (Laravel/PHP)
 
 7. **Estructura por dominio** — `app/Models/{Domain}/`, `app/Services/{Domain}/`, `app/Http/Resources/{Domain}/`, `app/Http/Requests/{Domain}/`
-8. **Patrón CRUD completo** — Entidades nuevas deben tener Model, Request, Service y Resource
-9. **Relaciones polimórficas** — Via `model_has_relations` con `wherePivotNull('deleted_at')`
-10. **Roles whitelist** — Siempre `hasRole('employee|customer')`, nunca `!hasRole('...')`
-11. **Filtrado dual** — Service controla eager loading (`Auth::hasRole`), Resource controla serialización (`$this->hasRole`)
-12. **Naming** — snake_case en respuestas JSON, camelCase en relaciones PHP
+8. **Patrón CRUD completo** — Entidades nuevas deben tener Model, Request, Service y Resource. El Model extiende `Entity` (no `Model` directamente). Si tiene campo `code`, generarlo con `$this->uniqueCode()`. Si tiene `searchable_tags`, actualizarlo tras save con `formatSearchableTags()`
+9. **Relaciones polimórficas** — BelongsToMany via `model_has_relations` requiere: `->where('model_has_relations.first_model_type', self::class)`, `->where('model_has_relations.second_model_type', Target::class)`, `->withPivot('properties')` y `->wherePivotNull('deleted_at')`
+10. **Roles whitelist** — Siempre `hasRole('employee|customer')`, nunca `!hasRole('...')`. Nuevos roles no deben ver datos sensibles por defecto
+11. **Filtrado dual** — Service controla eager loading (`Auth::hasRole`), Resource controla serialización (`$this->hasRole`). El backend calcula precios/totales para todos los roles; solo el Resource los oculta
+12. **Naming** — snake_case en respuestas JSON (`cost_centers`), camelCase en relaciones PHP (`costCenters`)
 13. **Sin migraciones** — No debe haber ficheros nuevos en `database/migrations/`
 14. **Rutas** — Prefix una sola vez, agrupadas por dominio, middleware al nivel más alto aplicable
-15. **Validación de arrays** — `'field' => 'present|array'` + `'field.*' => 'required|numeric|exists:table,id'`
+15. **Validación de arrays** — `'field' => 'present|array'` + `'field.*' => 'required|numeric|exists:table,id'`. Campos escalares bajo `fields.*`, relaciones como arrays de IDs en claves top-level
 16. **Include pattern** — Carga condicional via `?include=` con `in_array()` en Service
-17. **Resource pattern** — Campos condicionales via `$this->relationLoaded()` en Resource
-18. **Excepciones con HTTP status** — `throw new Exception(Response::HTTP_CONFLICT)`. El status code es el mensaje de la excepción, capturado por `exceptionResponse()`
-19. **Transacciones explícitas** — Toda operación de escritura debe usar `DB::beginTransaction()` / `commit()` / `rollBack()` dentro de try-catch
-20. **broadcast() después de commit()** — Si se usa `broadcast()`, debe ir después de `DB::commit()`, nunca dentro del try antes del commit
+17. **Resource pattern** — Estructura siempre `{ id, fields: {escalares}, relacion1: {}, relacion2: [] }`. Relaciones cargadas condicionalmente con `$this->relationLoaded()`. Todo Resource debe llamar `$this->addEntityRelations($result)` antes de retornar
+18. **Excepciones con HTTP status** — `throw new Exception(Response::HTTP_CONFLICT)`. El status code es el mensaje; nunca lanzar excepciones con strings de texto libre
+19. **Transacciones explícitas** — Toda escritura: `DB::beginTransaction()` al inicio del try, `DB::commit()` al final, `DB::rollBack()` + `return $this->exceptionResponse($exception)` en el catch. Sin transacción sin try-catch
+20. **`event()` y `broadcast()` después de commit()** — Ambos deben ir DESPUÉS de `DB::commit()`, nunca antes ni dentro del catch. `broadcast()->toOthers()` para push WebSocket; `event()` para listeners internos
 21. **GetRequest para listados** — Preferir `GetRequest` que centraliza parsing de `include`, `filter`, `sort`, `perPage`. No reinventar el parsing en controllers nuevos
+22. **Auth facade** — Usar siempre `App\Models\Shared\Auth`. Detectar usos de `auth()->user()`, `Auth::user()` de `Illuminate\Support\Facades\Auth` o `request()->user()` — todos son anti-patrones en este proyecto
+23. **Controller ultra-thin** — Controllers solo instancian el Service en el constructor y delegan. Flagear: acceso directo a modelos o BD, condiciones de negocio, validación manual, cualquier lógica que no sea instanciar + delegar
+24. **`entityQuery()` al inicio de `query()`** — Todo método `query()` en un Service debe llamar `$query = $this->entityQuery($query, $include, $filter)` como primera operación tras crear el Builder. Si falta, los filtros e includes compartidos de `Entitable` no se aplican
+25. **Audit trail en save()** — En creación (`!$entity->exists`): asignar `creator_type = get_class(Auth::user())` y `creator_id = Auth::id()`. En edición: `updater_type` y `updater_id`. Nunca hardcodear el class string — usar `get_class(Auth::user())` o `Auth::type()`
+26. **Guardia de estado en save() y delete()** — Si la entidad tiene `status_id`: verificar `if ($entity->exists && !$entity->isEditable()) throw new Exception(Response::HTTP_CONFLICT)` antes de modificar; `if (!$entity->isDeletable()) throw new Exception(Response::HTTP_CONFLICT)` antes de eliminar
+27. **`withTrashed()` en relaciones a soft-deletable** — Cualquier `morphTo()` o `belongsTo()` que apunte a una entidad con `SoftDeletes` debe encadenarse con `->withTrashed()`. No solo `creator`, `updater`, `deleter` — también `model()`, `orderable()`, y cualquier otra relación polimórfica a entidades eliminables
+28. **Convenciones de respuesta HTTP** — GET single: `new EntityResource(...)` sin wrapper `response()`. GET paginado: `EntityResource::paginate(...)`. POST/PUT: `response(new EntityResource($entity), $entity->wasRecentlyCreated ? 201 : 200)`. DELETE: `response(null, 200)`. Operación asíncrona (job/export): `response(null, 201)`
+29. **Naming de Events** — `{Entity}ChangedEvent` para crear/actualizar, `{Entity}DeletedEvent` para eliminar. Ubicación: `app/Events/{Domain}/`. Flagear nombres que no sigan la convención o que estén fuera del directorio correcto
+30. **GlobalScopes — whitelist obligatoria** — Toda restricción dentro de un `addGlobalScope` que filtre por rol debe usar `hasRole('employee|customer')` (whitelist), nunca `!hasRole('...')`. Con negación, cualquier rol nuevo bypasea la restricción por defecto y accede a datos que no debería ver
 
 ### Criterios frontend (React/JS)
 
-22. **Semicolons obligatorios** — En toda sentencia
-23. **className con llaves** — `className={'clase'}`, no `className="clase"`
-24. **Espaciado en items** — No `gap`/`spacing` en contenedores. Usar `mx-1`, `px-2` en hijos
-25. **Evitar sx prop** — Preferir clases CSS
-26. **No w-full** — Usar `width="100%"` como prop de MUI
-27. **Typography con variant** — Nunca estilos inline (`sx={{fontSize, fontWeight}}`)
-28. **Botones sin Typography** — Texto directo como children del Button
-29. **Props string sin llaves** — `variant="contained"`, no `variant={"contained"}`
-30. **No pasar valores por defecto** — Omitir parámetros que coincidan con el default de la función
-31. **No if/else inline** — Siempre con llaves y saltos de línea
-32. **No abreviaturas de una letra** — En `.map()`, `.filter()`, `.find()` usar nombres descriptivos (`item`, `order`), no `x`, `e`, `i`
-33. **function para features, arrow para shared** — Declaraciones de función para componentes feature, arrow functions para utilidades/shared
-34. **Hooks al inicio agrupados** — Hooks agrupados por categoría al inicio del componente. Early return después de hooks
-35. **Helpers a nivel de archivo** — Funciones auxiliares encima del componente, no dentro
-36. **i18next.t() directo** — No usar hook `useTranslation()`
-37. **FontAwesome** — Solo `fasr` (sharp regular) y `fass` (sharp solid). Nunca `fal`
-38. **ActionTypography para códigos copiables** — Nunca Typography plano para códigos de pedidos, facturas, clientes
-39. **Separar useEffects** — Un useEffect por side effect. No mezclar múltiples efectos
-40. **overflow-x: clip** — Nunca `hidden` (rompe position: sticky)
-41. **Props destructuradas en firma** — Destructurar props en los parámetros de la función con defaults inline: `const Component = ({label, icon, className = 'py-2'})`. No usar `props.xxx`
-42. **memo() en componentes de tabla/lista** — Componentes `*TableBody` y filas de tabla/lista SIEMPRE envueltos en `memo()`: `export default memo(ComponentName)`
-43. **import * as XService** — Preferir importar servicios como namespace: `import * as OrdersService from '...'`. Llamar como `OrdersService.list()`
-44. **Parámetros de servicio en orden** — Funciones de servicio API siempre en orden: `(id, filter, page, perPage, sort, include)`
-45. **&& para render condicional** — Preferir `{condition && <Component/>}` para una rama. Ternario solo cuando hay dos ramas reales con JSX
+31. **Semicolons obligatorios** — En toda sentencia
+32. **className con llaves** — `className={'clase'}`, no `className="clase"`
+33. **Espaciado en items** — No `gap`/`spacing` en contenedores. Usar `mx-1`, `px-2` en hijos
+34. **Evitar sx prop** — Preferir clases CSS
+35. **No w-full** — Usar `width="100%"` como prop de MUI
+36. **Typography con variant** — Nunca estilos inline (`sx={{fontSize, fontWeight}}`)
+37. **Botones sin Typography** — Texto directo como children del Button
+38. **Props string sin llaves** — `variant="contained"`, no `variant={"contained"}`
+39. **No pasar valores por defecto** — Omitir parámetros que coincidan con el default de la función
+40. **No if/else inline** — Siempre con llaves y saltos de línea
+41. **No abreviaturas de una letra** — En `.map()`, `.filter()`, `.find()` usar nombres descriptivos (`item`, `order`), no `x`, `e`, `i`
+42. **function para features, arrow para shared** — Declaraciones de función para componentes feature, arrow functions para utilidades/shared
+43. **Hooks al inicio agrupados** — Hooks agrupados por categoría al inicio del componente. Early return después de hooks
+44. **Helpers a nivel de archivo** — Funciones auxiliares encima del componente, no dentro
+45. **i18next.t() directo** — No usar hook `useTranslation()`
+46. **FontAwesome** — Solo `fasr` (sharp regular) y `fass` (sharp solid). Nunca `fal`
+47. **ActionTypography para códigos copiables** — Nunca Typography plano para códigos de pedidos, facturas, clientes
+48. **Separar useEffects** — Un useEffect por side effect. No mezclar múltiples efectos
+49. **overflow-x: clip** — Nunca `hidden` (rompe position: sticky)
+50. **Props destructuradas en firma** — Destructurar props en los parámetros de la función con defaults inline: `const Component = ({label, icon, className = 'py-2'})`. No usar `props.xxx`
+51. **memo() en componentes de tabla/lista** — Componentes `*TableBody` y filas de tabla/lista SIEMPRE envueltos en `memo()`: `export default memo(ComponentName)`
+52. **import * as XService** — Preferir importar servicios como namespace: `import * as OrdersService from '...'`. Llamar como `OrdersService.list()`
+53. **Parámetros de servicio en orden** — Funciones de servicio API siempre en orden: `(id, filter, page, perPage, sort, include)`
+54. **&& para render condicional** — Preferir `{condition && <Component/>}` para una rama. Ternario solo cuando hay dos ramas reales con JSX
+55. **useCustomNavigate obligatorio** — En la app web, usar siempre `useCustomNavigate` (de `hooks/Navigation/`), nunca `useNavigate` de react-router-dom directamente. El wrapper añade automáticamente el prefijo `/portal` en modo portal. Anti-patrón real detectado en `GoalsTableBody` y `ClusterProductsTableBody`
+56. **useCallback en componentes memo()** — Los handlers definidos dentro de componentes envueltos con `memo()` deben usar `useCallback`. Sin esto, cada render del padre pasa nuevas instancias de funciones como props, invalidando la memoización completamente. Patrón confirmado en todos los `*TableBody` correctos del proyecto
+57. **useTable para vistas de listado** — Las vistas con paginación usan `useTable({service, initialFilter, initialSort, persistedFilterCode})`. No gestionar `loading`, `filter`, `page`, `perPage`, `sort`, `content` con useState individuales. Junto a `useFilter` para los grupos de filtros visuales
+58. **useDisplayColumn para columnas opcionales** — Tablas con columnas ocultables por el usuario usan `useDisplayColumn(columns)` y `displayColumn('field_id')`. No implementar esta lógica de visibilidad manualmente
+59. **Componentes especializados en celdas de tabla** — En `*TableBody`, usar siempre los pipes y chips del proyecto: `DateTimeFormat` para fechas, `TextNumericFormat` para números, `EntityStatusChip` para estados, `ActionTypography` con prop `search` para códigos copiables, `SearchableTypography` para texto buscable. Nunca formatear fechas o números con métodos nativos de JS en JSX
+60. **@grupodesa/core para lógica compartida** — Hooks y servicios API viven en el paquete `@grupodesa/core`. No duplicar en `apps/web/` lógica que ya existe en core. Importar siempre desde `@grupodesa/core/src/...`. Nunca usar rutas relativas que crucen packages (`../../packages/core`)
+61. **hasRole segundo parámetro `false` para modo portal** — Para detectar exclusivamente el modo portal (sin incluir super-admin): `hasRole('customer', false)`. Con el parámetro omitido, super-admin también cumple la condición, lo que puede revelar UI restringida a admins
+62. **Mobile: useTheme() para estilos, no StyleSheet.create** — En mobile, todos los estilos van via `useTheme()`. Acceder como `theme.pressable.primary`, `theme.text.hint`, `theme.view.screen`. Nunca `StyleSheet.create()` ni estilos inline arbitrarios. Overrides puntuales con array: `style={[theme.textInput.text, {marginBottom: 8}]}`
+63. **`key` prop con ID de entidad** — En `.map()` sobre listas de entidades, usar siempre el `id` único como `key`. Nunca el índice del array (`index`). Con índices, React no puede reconciliar correctamente al reordenar o filtrar, causando bugs visuales y pérdida de estado local del componente
 
 ## Paso 6: Formato de salida
 
@@ -151,6 +171,8 @@ Sin incidencias. Los cambios cumplen con los estándares del equipo.
 - **Nunca** sugerir crear migraciones Laravel. No existen en este proyecto
 - **Nunca** reportar incidencias preexistentes (que ya estaban antes de los cambios)
 - **Nunca** reportar lo que un linter o formateador ya detectaría (imports no usados, formato)
+- **Nunca** sugerir redefinir relaciones ya provistas por `Entitable`: `creator`, `updater`, `deleter`, `status`, `uploads`, `alerts`, `comments`, `audits`, `customFieldValues` — ya existen en todos los modelos de dominio
+- **Nunca** reportar hardcoded class strings preexistentes — solo flagear los introducidos en el diff (`'App\\Models\\...'` en lugar de `Model::class`)
 - Si la confianza es < 75, omitir la incidencia silenciosamente
 - Ser conciso: una línea de descripción + una de sugerencia por incidencia
 - Siempre referenciar fichero y número de línea
