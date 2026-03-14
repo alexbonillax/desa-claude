@@ -14,14 +14,20 @@ Analiza lo que pide el usuario con $ARGUMENTS:
 - **Consulta** (buscar, leer, explorar, "qué dice la wiki sobre..."): Usa solo endpoints GET. No intentes escribir.
 - **Documentar** (crear, actualizar, documentar, escribir): Usa endpoints GET para explorar y leer, y POST para crear/actualizar.
 
-Si un POST devuelve error 403 o similar, informa al usuario de que no tiene permisos de escritura y ofrece mostrar el contenido que habría escrito para que lo copie manualmente.
+Gestión de errores de la API:
+
+- **401**: Token caducado o inválido → pide al usuario un nuevo token y actualiza `settings.json` antes de reintentar
+- **403**: Autenticado pero sin permisos de escritura → informa al usuario y ofrece mostrar el contenido que habría enviado para que lo copie manualmente
+- **404**: Documento no encontrado → verifica el ID y navega desde root para encontrar el correcto
+- **422**: Error de validación → lee el campo `errors` de la respuesta JSON para identificar el campo problemático
+- **5xx**: Error del servidor → informa al usuario e invita a reintentar en unos instantes
 
 ## Configuración
 
 **Antes de cualquier llamada a la API**, extrae el token de `~/.claude/settings.json`:
 
 ```bash
-python3 -c "import json; print(json.load(open('$HOME/.claude/settings.json')).get('desa_wiki_token',''))"
+python3 -c "import json, os; f=os.path.expanduser('~/.claude/settings.json'); print(json.load(open(f)).get('desa_wiki_token','') if os.path.exists(f) else '')"
 ```
 
 Guarda el valor resultante y úsalo directamente en todas las llamadas curl como `Bearer TOKEN`.
@@ -58,6 +64,18 @@ Si el resultado está vacío (no hay token guardado):
 | POST | `/documents/{id}` | Actualizar documento |
 | DELETE | `/documents/{id}` | Soft delete |
 
+Las respuestas POST devuelven el documento completo. Extraer el campo `id` del body para usarlo en la verificación posterior (`GET /documents/{id}`).
+
+**DELETE requiere confirmación explícita**: antes de ejecutar cualquier DELETE, mostrar al usuario el título del documento y pedir confirmación. Aunque es soft delete (recuperable por administración), el usuario debe aprobarlo explícitamente.
+
+### Paginación
+
+Los endpoints GET devuelven resultados paginados (por defecto 25 por página). Si un nodo tiene muchos hijos o hay muchos resultados de búsqueda, añadir `&perPage=100` para obtener más en una sola llamada. Ejemplo:
+
+```
+GET /documents?filter[document]={id}&include=documents&perPage=100
+```
+
 ### Includes disponibles
 
 `document` (padre recursivo hasta root), `documents` (hijos), `teams`, `roles`, `status`, `creator`, `updater`
@@ -83,6 +101,7 @@ Si el resultado está vacío (no hay token guardado):
 - `description`: resumen breve del contenido (max 255 caracteres). Siempre rellenarlo
 - `content`: markdown libre, puede ser null
 - `searchable_tags`: palabras clave separadas por coma que facilitan la búsqueda fulltext. El título se añade automáticamente, no hace falta repetirlo. Incluir: nombres de tecnologías, conceptos clave, siglas, términos de negocio relevantes. **Siempre rellenarlo** al crear o actualizar un documento
+- `is_published`: usar siempre `true`. Solo `false` si el usuario pide explícitamente guardar un borrador
 - `teams: []` y `roles: []` → documento público para todos los empleados
 - Root (id=1) NO se puede editar vía API
 
@@ -149,20 +168,30 @@ Palabras que frecuentemente se escriben sin tilde por error:
 
 ## Flujo de trabajo para consultas
 
-1. **Explorar**: `GET /documents/root?include=documents` para ver la estructura
-2. **Navegar**: `GET /documents?filter[document]={id}&include=documents` para ver hijos
-3. **Buscar**: `GET /documents?filter[search]=texto` para buscar por tags
-4. **Leer**: `GET /documents/{id}` para ver contenido
+1. **Buscar**: `GET /documents?filter[search]=texto` — si la consulta es sobre un concepto, sistema o proceso concreto, empezar aquí
+2. **Si la búsqueda no es fructífera o la consulta es exploratoria**: `GET /documents/root?include=documents` para ver la estructura general
+3. **Navegar**: `GET /documents?filter[document]={id}&include=documents` para profundizar en un nodo
+4. **Leer**: `GET /documents/{id}` para ver el contenido completo
 5. **Resumir**: Presenta la información al usuario de forma clara y concisa
 
 ## Flujo de trabajo para documentar
 
-1. **Explorar**: `GET /documents/root?include=documents` para ver la estructura
-2. **Navegar**: `GET /documents?filter[document]={id}&include=documents` para ver hijos
-3. **Leer**: `GET /documents/{id}` para ver contenido actual
-4. **Revisar ortografía**: Antes de enviar, repasa title, description y content buscando palabras sin tilde. Consulta la tabla de la sección "Ortografía" y corrige. Este paso es obligatorio
-5. **Escribir**: `POST /documents/new` para crear o `POST /documents/{id}` para actualizar
-6. **Verificar**: `GET /documents/{id}` para confirmar
+1. **Buscar primero**: `GET /documents?filter[search]=palabras_clave` — verificar si ya existe documentación sobre el tema. Si existe, continuar como **actualización** del documento encontrado; si no, continuar como **creación**
+2. **Explorar**: `GET /documents/root?include=documents` para entender la estructura y determinar dónde debe vivir el nuevo contenido
+3. **Navegar**: `GET /documents?filter[document]={id}&include=documents` para localizar el nodo padre correcto
+4. **Leer**: `GET /documents/{id}` — obligatorio antes de cualquier escritura. Al actualizar: leer el documento completo para preservar el contenido existente. Al crear: leer el padre para entender el contexto
+5. **Revisar ortografía**: Antes de enviar, repasa title, description y content buscando palabras sin tilde. Consulta la tabla de la sección "Ortografía" y corrige. Este paso es obligatorio
+
+**Si creas** un documento nuevo:
+- Identificar el `document_id` del padre en el paso 3
+- `POST /documents/new` con todos los campos, incluyendo `document_id`
+- Si es documentación de lógica de negocio, seguir también el flujo de **Referencias cruzadas** (sección «Estructura de la wiki») para enlazarlo desde el eje de negocio y actualizar el índice de la aplicación
+
+**Si actualizas** un documento existente:
+- Enviar TODOS los campos con el contenido completo. Los campos omitidos o con `null` borran el contenido
+- `POST /documents/{id}` con el body completo leído en el paso 4 más los cambios aplicados
+
+6. **Verificar**: `GET /documents/{id}` para confirmar que el resultado es el esperado
 
 ## Estructura de la wiki
 
@@ -220,9 +249,9 @@ Las páginas de Lógica de Negocio están orientadas a perfiles no técnicos (di
 - Usar ejemplos numéricos concretos cuando ayuden a entender
 - Estructura: descripción breve → separador → secciones por regla
 
-## Precaución con las actualizaciones
+## Regla de oro al actualizar
 
-Cuando actualices un documento existente (POST /documents/{id}), debes enviar TODOS los campos incluyendo el contenido completo. Si envías `content: null`, se borrará el contenido existente. Lee siempre el documento antes de actualizarlo para preservar su contenido.
+`POST /documents/{id}` reemplaza el documento completo. Un campo omitido o `null` borra su contenido. **Siempre leer antes de actualizar** (paso 4 del flujo de documentar) y enviar el body completo con los cambios aplicados encima.
 
 ## Importante
 
