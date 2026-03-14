@@ -29,7 +29,7 @@ Comportamiento según resultado:
 **Antes de cualquier llamada a la API**, extrae el token de `~/.claude/settings.json`:
 
 ```bash
-python3 -c "import json; print(json.load(open('$HOME/.claude/settings.json')).get('desa_wiki_token',''))"
+python3 -c "import json, os; f=os.path.expanduser('~/.claude/settings.json'); print(json.load(open(f)).get('desa_wiki_token','') if os.path.exists(f) else '')"
 ```
 
 Guarda el valor resultante y úsalo directamente en todas las llamadas curl como `Bearer TOKEN`.
