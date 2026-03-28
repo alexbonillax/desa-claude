@@ -1,7 +1,7 @@
 ---
 description: Revisar código aplicando los estándares del equipo antes de commit o PR
-argument-hint: [ruta de archivo, número de PR (#42), o vacío para cambios locales]
-allowed-tools: Bash(git:*), Bash(gh:*)
+argument-hint: [ruta de archivo, número de PR (#42), vacío para cambios locales, --verbose]
+allowed-tools: Bash(git:*), Bash(gh:*), Read, Grep, Glob
 ---
 
 # Review — Revisión de código con estándares Grupo Desa
@@ -13,10 +13,16 @@ Revisa cambios de código aplicando las convenciones del equipo. Detecta automá
 Desde el directorio de trabajo actual:
 
 ```bash
-if [ -f artisan ] && [ -f composer.json ]; then echo "backend"; elif [ -d apps/web ] || [ -d apps/mobile ] || [ -d packages/core ]; then echo "frontend"; else echo "unknown"; fi
+DIFF_FILES=$(git diff --staged --name-only 2>/dev/null || git diff --name-only 2>/dev/null || git diff HEAD~1 --name-only 2>/dev/null)
+if [ -f artisan ] && [ -f composer.json ]; then echo "backend";
+elif [ -d apps/mobile ] && echo "$DIFF_FILES" | grep -q "apps/mobile/"; then echo "mobile";
+elif [ -d apps/web ] || [ -d packages/core ]; then echo "frontend";
+else echo "unknown"; fi
 ```
 
 Si es `unknown`, informar al usuario y terminar.
+
+Si el diff toca tanto `apps/web/` como `apps/mobile/`, aplicar criterios de ambos (frontend + mobile).
 
 ## Paso 2: Obtener los cambios a revisar
 
@@ -39,15 +45,21 @@ Indicar al usuario qué fuente se está revisando (staged, unstaged, último com
 
 Leer el fichero `CLAUDE.md` de la raíz del proyecto actual. Si contiene reglas no cubiertas por los criterios de este prompt, aplicarlas también.
 
+Leer también el `MEMORY.md` del proyecto si existe (`~/.claude/projects/{project-path}/memory/MEMORY.md`). Si contiene trampas o convenciones adicionales, aplicarlas.
+
 ## Paso 4: Contexto de patrones existentes
 
 Solo cuando una incidencia potencial requiera verificación contra el código existente (criterio #1), leer un fichero del mismo directorio o dominio que sirva de referencia. No leer ficheros preventivamente — solo bajo demanda para confirmar o descartar una sospecha.
+
+**Excepción**: Si el diff toca un Service o un archivo que pasa `include` a la API, buscar proactivamente patrones `include` con punto anidado (ej. `indicator.process`) — es un error recurrente [#74].
 
 ## Paso 5: Revisar los cambios
 
 Analizar cada fichero modificado. Para cada posible incidencia, asignar internamente un nivel de confianza (0-100). **Solo reportar incidencias con confianza >= 75.**
 
-**Severidad**: Crítico para seguridad, corrupción de datos o bugs silenciosos (criterios #6, #13, #22, #25, #27, #30, #33). Importante para violaciones de patrón estructural que afectan a corrección o mantenibilidad. Menor para estilo, naming y convenciones.
+**Severidad**: Crítico para seguridad, corrupción de datos o bugs silenciosos (criterios #6, #13, #22, #25, #27, #30, #33, #49, #69, #74). Importante para violaciones de patrón estructural que afectan a corrección o mantenibilidad. Menor para estilo, naming y convenciones.
+
+Si `$ARGUMENTS` contiene `--verbose` o `-v`, añadir al final del reporte una sección con las incidencias descartadas por confianza < 75 (ver formato en Paso 6).
 
 ### Criterios compartidos (ambos proyectos)
 
@@ -105,7 +117,7 @@ Analizar cada fichero modificado. Para cada posible incidencia, asignar internam
 46. **Hooks al inicio agrupados** — Hooks agrupados por categoría al inicio del componente. Early return después de hooks
 47. **Helpers a nivel de archivo** — Funciones auxiliares encima del componente, no dentro
 48. **i18next.t() directo** — No usar hook `useTranslation()`
-49. **FontAwesome** — Solo `fasr` (sharp regular) y `fass` (sharp solid). Nunca `fal`
+49. **FontAwesome** — Solo `fasr` (sharp regular) y `fass` (sharp solid). Nunca `fal`. Si el diff introduce `fal`, reportar como **Crítico** (el icono no se renderiza en runtime)
 50. **ActionTypography para códigos copiables** — Nunca Typography plano para códigos de pedidos, facturas, clientes
 51. **Separar useEffects** — Un useEffect por side effect. No mezclar múltiples efectos
 52. **overflow-x: clip** — Nunca `hidden` (rompe position: sticky)
@@ -125,13 +137,33 @@ Analizar cada fichero modificado. Para cada posible incidencia, asignar internam
 66. **`key` prop con ID de entidad** — En `.map()` sobre listas de entidades, usar siempre el `id` único como `key`. Nunca el índice del array (`index`). Con índices, React no puede reconciliar correctamente al reordenar o filtrar, causando bugs visuales y pérdida de estado local del componente
 67. **`SimpleMenuButton` — `openMenu` como `null | id`** — En `*TableBody`, el estado `openMenu` debe ser `null | entityId`, nunca `boolean`. Con `useState(false)`, al abrir cualquier menú de fila todos los botones de la tabla reciben `Mui-focused`. Patrón correcto: `useState(null)` + `openMenu={openMenu === entity.id}` + `setOpenMenu={(open) => setOpenMenu(open ? entity.id : null)}`
 68. **`handleClose` en Dialog solo cierra** — `handleClose` debe únicamente llamar `setOpen(false)`. Todo reset de estado (`setValue(null)`, `setActiveStep(0)`, etc.) debe ir en `handleClosed` vinculado a `TransitionProps={{ onExited: handleClosed }}`. Resetear estado en `handleClose` lo hace durante la animación de salida, causando espasmos visuales (cambio de tamaño, layout roto)
+69. **i18next.t() nunca a nivel de módulo** — Llamar siempre dentro de componente/hook (useMemo, render). Fuera del componente falla en producción (funciona en dev por HMR)
+70. **No editar archivos de traducción directamente** — Los archivos `packages/i18n/src/locales/` no se tocan a mano. Usar `/desa:translations` para gestionar terms vía API
+71. **Bordes siempre con clases** — `border border-color-150`, nunca `sx={{border: '1px solid...'}}`. No cambiar grosor del border para estados activos/selected
+72. **Clases condicionales con parte común** — Usar template literal con prefijo compartido: `` `background-color-${current ? 'accent-50' : '0'}` ``
+73. **Elementos ocultos para medición** — `position: fixed; top: -9999`, nunca `visibility: hidden`
+74. **API include siempre plano** — Nunca anidar con punto (`indicator.process`). Solo nombres de relación separados por comas. Error recurrente en Services
+75. **TextNumericFormat obligatorio para números** — Nunca `Math.round`, `toFixed` ni template literals para formatear números en JSX
+76. **PageLoading en diálogos** — Nunca cargar datos antes de abrir el dialog. Nunca CircularProgress en el título. PageLoading siempre dentro de `<DialogContent>`
+77. **CustomFieldsForm disabled=true por defecto** — En diálogos de edición, pasar `disabled={false}` explícitamente
+78. **SimpleTabs top en portal** — Sin ActionBar, pasar `top={'var(--h-menu)'}` explícitamente
+79. **TableCell align="center" solo en header** — En body, centrar con `<Stack alignItems="center">` + Typography `align="center"`
+80. **ExpandIcon para chevrons animados** — No implementar rotación manual, usar `<ExpandIcon expanded={open}/>`
+81. **ClickableTooltip necesita ref en hijo** — Si el hijo es componente custom, envolver en `<span>`
+
+### Criterios mobile (React Native)
+
+82. **Reutilizar core antes de reimplementar** — Comprobar `packages/core/src/hooks/` antes de crear lógica nueva en mobile
+83. **Screens sin lógica de componentes** — `app/` solo contiene screens (routing). Lógica en `components/features/`
+84. **Nombres de theme = componente RN** — `pressable` no `button`, `textInput` no `input`
+85. **Textos anidados en theme** — `theme.pressable.primary.text`, no `theme.pressable.primaryText`
 
 ## Paso 6: Formato de salida
 
 ```
 ## Revisión de código
 
-**Proyecto**: {backend|frontend}
+**Proyecto**: {backend|frontend|mobile}
 **Fuente**: {staged|unstaged|último commit|PR #N}
 **Ficheros revisados**: {N}
 
@@ -157,12 +189,20 @@ Analizar cada fichero modificado. Para cada posible incidencia, asignar internam
 **Resumen**: X críticos · Y importantes · Z menores
 ```
 
+Si modo verbose (`--verbose` o `-v`), añadir al final:
+
+```
+### Descartadas (confianza < 75)
+
+- **fichero:línea** — Descripción (confianza: N) [#N]
+```
+
 Omitir secciones de severidad vacías. Si no hay incidencias:
 
 ```
 ## Revisión de código
 
-**Proyecto**: {backend|frontend}
+**Proyecto**: {backend|frontend|mobile}
 **Fuente**: {staged|unstaged|último commit|PR #N}
 **Ficheros revisados**: {N}
 
