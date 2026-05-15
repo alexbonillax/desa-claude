@@ -189,6 +189,8 @@ Aplicables a proyectos detectados como `websites` (Next.js + MUI sin estructura 
 
 Tras la revisión estática (Pasos 1-5), si el proyecto tiene infraestructura de tests, ejecutarlos filtrados por el diff actual para verificar que los cambios no rompen nada y que la cobertura sigue siendo aceptable.
 
+> **⚠️ Paso 6 es incondicional respecto a Paso 5.** Aunque Paso 5 haya reportado incidencias importantes o críticas sobre los cambios (código muerto, over-engineering, etc.), Paso 6 SE EJECUTA igual si hay tests configurados. La razón es que Paso 5, Paso 6 y Paso 7 son **fuentes de información complementarias**: estilo/diseño + ejecución de tests + cobertura. El dev consolida las tres en el reporte final y decide. No omitir Paso 6 porque los cambios "parezcan mejorables" — siempre es informativo conocer si rompen tests o bajan cobertura.
+
 ### Detección del runner de tests
 
 Comprobar la presencia de ficheros de configuración:
@@ -281,6 +283,8 @@ Solo se ejecuta esta fase si:
 2. El proyecto tiene un umbral de cobertura configurado y el reporte de cobertura **sobre los ficheros modificados en el diff** está por debajo del umbral
 
 Si la cobertura ya cumple, **omitir Paso 7 silenciosamente** y continuar a Paso 8.
+
+> **⚠️ Paso 7 también es incondicional respecto a Paso 5.** Si Paso 6 pasó verde y hay gap de cobertura, Paso 7 SE EJECUTA aunque Paso 5 haya tachado los cambios como código muerto / over-engineering. La razón es la misma que con Paso 6: el dev necesita la información completa para decidir. Generar tests sobre código que quizá se va a borrar no es desperdicio — el dev verá el reporte completo y decidirá si borra el código o conserva los tests. Caso especial: si el dev finalmente decide borrar el código fuente, también borrará los tests generados — eso es trabajo trivial comparado con la pérdida de información si Paso 7 se hubiera saltado.
 
 ### Identificación de gaps
 
