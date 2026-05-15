@@ -185,7 +185,142 @@ Aplicables a proyectos detectados como `websites` (Next.js + MUI sin estructura 
 105. **MSW intercepta `fetch` en tests** — Los tests unit con MSW activo NO deben mockear `fetch` directamente. Usar fixtures de `tests/fixtures/api/` y, si falta una, crear una nueva fixture explícita en lugar de inline mock dentro del test
 106. **`globalThis.session` reset automático en tests** — `tests/setup.js` lo resetea en cada `beforeEach`. No resetearlo manualmente en los tests. Si un test necesita un locale concreto, llamar `setSession('locale', 'fr')` al inicio del test, no recrear el objeto entero
 
-## Paso 6: Formato de salida
+## Paso 6: Ejecutar tests (solo si el proyecto tiene tests configurados)
+
+Tras la revisión estática (Pasos 1-5), si el proyecto tiene infraestructura de tests, ejecutarlos filtrados por el diff actual para verificar que los cambios no rompen nada y que la cobertura sigue siendo aceptable.
+
+### Detección del runner de tests
+
+Comprobar la presencia de ficheros de configuración:
+
+```bash
+# Backend
+HAS_PEST=$([ -f phpunit.xml ] || [ -f phpunit.xml.dist ] && echo "yes" || echo "no")
+
+# Websites / frontend monorepo
+HAS_VITEST=$([ -f vitest.config.js ] || [ -f vitest.config.mjs ] || [ -f vitest.config.ts ] && echo "yes" || echo "no")
+HAS_PLAYWRIGHT=$([ -f playwright.config.js ] || [ -f playwright.config.ts ] && echo "yes" || echo "no")
+```
+
+Si ninguno está configurado, **omitir la Fase 6 silenciosamente** y continuar a Paso 7. No es error.
+
+### Ejecución por project type
+
+#### project_type = backend (Pest)
+
+1. Derivar el filtro:
+    - Si el diff toca `app/Services/Foo/BarService.php`, filtrar por `tests/Feature/Foo/Bar*Test.php` o `tests/Unit/Foo/Bar*Test.php`
+    - Si el diff toca `app/Models/`, filtrar por `tests/Feature/{Domain}/`
+    - Si no se puede derivar filtro claro, ejecutar suite completa
+2. Ejecutar:
+    ```bash
+    APP_ENV=testing ./vendor/bin/pest --filter="[filtro]" --coverage
+    ```
+3. Capturar exit code y output
+
+#### project_type = websites (Vitest + opcional Playwright)
+
+1. Derivar filtro:
+    - `src/hooks/<X>.js` → `tests/unit/hooks/<X>.test.{js,jsx}`
+    - `src/lib/<X>.js` → `tests/unit/lib/<X>.test.{js,jsx}`
+    - `src/api/services/<X>.js` → `tests/unit/services/<X>.test.{js,jsx}`
+    - `src/components/<dir>/<X>.jsx` → `tests/unit/<dir>/<X>.test.{js,jsx}`
+2. Ejecutar:
+    ```bash
+    npx vitest run --coverage [patrones-derivados]
+    ```
+3. Si `HAS_PLAYWRIGHT=yes` y `tests/e2e/smoke/` no está vacío, ejecutar también:
+    ```bash
+    npx playwright test [specs-relacionadas]
+    ```
+    Si `tests/e2e/smoke/` está vacío (E2E diferidos), omitir Playwright silenciosamente.
+
+#### project_type = frontend (monorepo)
+
+⚠️ **TODO**: pendiente de definir el runner de tests del monorepo cuando el equipo lo configure. Mientras tanto:
+
+```
+echo "🟡 Ejecución de tests para frontend monorepo aún no implementada en esta skill."
+echo "Pendiente del Bloque de testing del monorepo. Omitiendo Fase 6."
+```
+
+Continuar a Paso 7.
+
+#### project_type = mobile
+
+⚠️ **TODO**: pendiente de definir el runner de tests de mobile (probable Jest). Mientras tanto:
+
+```
+echo "🟡 Ejecución de tests para mobile aún no implementada en esta skill."
+echo "Pendiente del Bloque de testing de mobile. Omitiendo Fase 6."
+```
+
+Continuar a Paso 7.
+
+### Interpretación del resultado
+
+- **Todos los tests pasan, exit 0** → Anotar para el reporte final (Paso 8): `Tests: N pasados / N (incluido en sección "Tests")`. Continuar a Paso 7.
+- **Algún test falla** → Anotar fichero:test:error. Generar una propuesta de corrección (qué línea cambiar y cómo). **Preguntar al dev** antes de aplicar:
+    > He detectado N tests fallando tras tus cambios. ¿Quieres que aplique las correcciones propuestas? (s/n)
+
+    Si el dev responde "s", aplicar y re-ejecutar (bucle máximo 3 iteraciones para correcciones de tests pre-existentes). Si tras 3 iter sigue fallando, reportar al dev sin aplicar más cambios y NO continuar a Paso 7.
+- **Tests no ejecutables** (error de configuración, no error de test) → Anotar como anomalía y omitir Paso 7. NO intentar arreglar la configuración.
+
+### Reglas estrictas para esta fase
+
+- **Nunca** modificar el código fuente del proyecto en esta fase. Solo cambios sobre tests pre-existentes que estén fallando.
+- **Nunca** generar tests nuevos aquí — eso es Paso 7.
+- **Nunca** continuar a Paso 7 si Paso 6 falla y el dev no autoriza correcciones.
+- Si el bucle de 3 iter no converge, devolver control al dev sin más intentos.
+
+## Paso 7: Generar tests faltantes (solo si Paso 6 pasó y la cobertura es insuficiente)
+
+Solo se ejecuta esta fase si:
+
+1. Paso 6 pasó verde (todos los tests existentes en verde)
+2. El proyecto tiene un umbral de cobertura configurado y el reporte de cobertura **sobre los ficheros modificados en el diff** está por debajo del umbral
+
+Si la cobertura ya cumple, **omitir Paso 7 silenciosamente** y continuar a Paso 8.
+
+### Identificación de gaps
+
+Del reporte de cobertura (generado en Paso 6 con `--coverage`), extraer:
+
+- Ficheros modificados con cobertura por debajo del umbral
+- Funciones y ramas concretas sin cubrir dentro de esos ficheros
+
+### Generación de tests (bucle máx. 3 iteraciones)
+
+Para cada gap detectado:
+
+1. **Leer el código sin cubrir** del fichero fuente
+2. **Leer un test existente del mismo dominio** como referencia de estilo y patrones (estructura `describe()/it()`, uso de fixtures, mocks)
+3. **Generar el test** siguiendo ese patrón. Ubicación según project_type:
+    - backend: `tests/Feature/{Domain}/` o `tests/Unit/{Domain}/`
+    - websites: `tests/unit/{dir}/{filename}.test.{js,jsx}` espejando la ruta de `src/`
+4. **Ejecutar el test recién generado**:
+    - backend: `APP_ENV=testing ./vendor/bin/pest tests/path/to/new-test.php`
+    - websites: `npx vitest run tests/unit/path/to/new-test.{js,jsx}`
+5. **Si pasa** → siguiente gap
+6. **Si falla** → leer error, corregir el test (NUNCA el código fuente), reintentar
+7. **Si tras 3 iter sigue fallando** → reportar al dev sin commit, dejar el test borrador con un comentario `// FIXME: generado por /review, no converge — ver iteración 3`
+
+### Tras procesar todos los gaps
+
+- `git add` de los tests nuevos y modificados
+- **NUNCA** `git commit` ni `git push`
+- Anotar para el reporte final (Paso 8): tests generados, gaps cubiertos, gaps no convergidos
+
+### Reglas estrictas para esta fase
+
+- **Nunca** generar tests sobre código que ya tenía fallos antes de los cambios del dev
+- **Nunca** mockear `fetch` directamente si MSW (websites) o Mocks/Factories (backend) ya están en juego. Usar fixtures existentes o crear nuevas explícitamente
+- **Nunca** generar tests para Server Components async en websites (limitación documentada del runtime — ver F-005 en `desa-websites/docs/superpowers/findings.md`)
+- **Nunca** modificar código de producción para hacer pasar un test generado. Si un test no se puede escribir sin tocar el fuente, abortar ese gap y reportarlo al dev
+- **Usar fixtures de `tests/fixtures/api/` en websites** y factories existentes en backend. NUNCA inline JSON gigante dentro de los tests
+- **Estilo de assertions** debe coincidir con tests existentes del mismo dominio (no introducir `chai`/`should` si el proyecto usa `expect` de vitest, etc.)
+
+## Paso 8: Formato de salida
 
 ```
 ## Revisión de código
@@ -237,6 +372,8 @@ Sin incidencias. Los cambios cumplen con los estándares del equipo.
 ```
 
 ## Reglas estrictas
+
+> Las siguientes reglas aplican al Paso 5 (revisión estática). Para reglas específicas del Paso 6 (ejecutar tests) y Paso 7 (generar tests), ver las "Reglas estrictas" al final de cada uno de esos pasos.
 
 - **Nunca** sugerir añadir comentarios al código
 - **Nunca** sugerir TypeScript. El frontend es JavaScript
