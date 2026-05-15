@@ -6,7 +6,7 @@ allowed-tools: Bash(git:*), Bash(gh:*), Read, Grep, Glob
 
 # Review — Revisión de código con estándares Grupo Desa
 
-Revisa cambios de código aplicando las convenciones del equipo. Detecta automáticamente si el proyecto es backend (Laravel/PHP) o frontend (React/JS monorepo).
+Revisa cambios de código aplicando las convenciones del equipo. Detecta automáticamente el tipo de proyecto: backend (Laravel/PHP con artisan), frontend (React/JS monorepo con `apps/web` o `packages/core`), websites (Next.js single-app con `next.config.*`) o mobile (React Native bajo `apps/mobile/`).
 
 ## Paso 1: Detectar tipo de proyecto
 
@@ -17,6 +17,7 @@ DIFF_FILES=$(git diff --staged --name-only 2>/dev/null || git diff --name-only 2
 if [ -f artisan ] && [ -f composer.json ]; then echo "backend";
 elif [ -d apps/mobile ] && echo "$DIFF_FILES" | grep -q "apps/mobile/"; then echo "mobile";
 elif [ -d apps/web ] || [ -d packages/core ]; then echo "frontend";
+elif [ -f next.config.js ] || [ -f next.config.mjs ] || [ -f next.config.ts ]; then echo "websites";
 else echo "unknown"; fi
 ```
 
