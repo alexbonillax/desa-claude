@@ -1,0 +1,20 @@
+# macOS
+.DS_Store
+**/.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Node (futuro, por si acaso)
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Ficheros personales dentro de .claude/
+# La carpeta .claude/ queda trackable (puede contener config del proyecto)
+# pero los ficheros de notas personales del autor se ignoran:
+.claude/BRIEFING.md
+.claude/RESUMEN_CAMBIOS.md

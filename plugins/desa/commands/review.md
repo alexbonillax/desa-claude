@@ -6,7 +6,7 @@ allowed-tools: Bash(git:*), Bash(gh:*), Read, Grep, Glob
 
 # Review — Revisión de código con estándares Grupo Desa
 
-Revisa cambios de código aplicando las convenciones del equipo. Detecta automáticamente si el proyecto es backend (Laravel/PHP) o frontend (React/JS monorepo).
+Revisa cambios de código aplicando las convenciones del equipo. Detecta automáticamente el tipo de proyecto: backend (Laravel/PHP con artisan), frontend (React/JS monorepo con `apps/web` o `packages/core`), websites (Next.js single-app con `next.config.*`) o mobile (React Native bajo `apps/mobile/`).
 
 ## Paso 1: Detectar tipo de proyecto
 
@@ -17,6 +17,7 @@ DIFF_FILES=$(git diff --staged --name-only 2>/dev/null || git diff --name-only 2
 if [ -f artisan ] && [ -f composer.json ]; then echo "backend";
 elif [ -d apps/mobile ] && echo "$DIFF_FILES" | grep -q "apps/mobile/"; then echo "mobile";
 elif [ -d apps/web ] || [ -d packages/core ]; then echo "frontend";
+elif [ -f next.config.js ] || [ -f next.config.mjs ] || [ -f next.config.ts ]; then echo "websites";
 else echo "unknown"; fi
 ```
 
@@ -158,7 +159,172 @@ Si `$ARGUMENTS` contiene `--verbose` o `-v`, añadir al final del reporte una se
 84. **Nombres de theme = componente RN** — `pressable` no `button`, `textInput` no `input`
 85. **Textos anidados en theme** — `theme.pressable.primary.text`, no `theme.pressable.primaryText`
 
-## Paso 6: Formato de salida
+### Criterios websites (Next.js single-app)
+
+Aplicables a proyectos detectados como `websites` (Next.js + MUI sin estructura de monorepo, ej. `desa-websites`).
+
+86. **Semicolons obligatorios** — En toda sentencia
+87. **className con llaves** — `className={'clase'}`, no `className="clase"`
+88. **Evitar sx prop** — Preferir clases Tailwind o estilos en SCSS. Solo usar `sx` cuando se necesita acceder a `theme` o props de MUI
+89. **Typography con variant** — Nunca estilos inline (`sx={{fontSize, fontWeight}}`)
+90. **Props string sin llaves** — `variant="contained"`, no `variant={"contained"}`
+91. **No if/else inline** — Siempre con llaves y saltos de línea
+92. **No abreviaturas de una letra** — En `.map()`, `.filter()`, `.find()` usar nombres descriptivos (`item`, `order`), no `x`, `e`, `i`
+93. **Hooks al inicio agrupados** — Hooks agrupados por categoría al inicio del componente. Early return después de hooks
+94. **Props destructuradas en firma** — Destructurar props en los parámetros de la función con defaults inline: `const Component = ({label, icon, className = 'py-2'})`. No usar `props.xxx`
+95. **import \* as XService** — Preferir importar servicios como namespace: `import * as SitesService from '@/api/services/SitesService'`. Llamar como `SitesService.get()`
+96. **`key` prop con ID de entidad** — En `.map()` sobre listas de entidades, usar siempre el `id` único como `key`. Nunca el índice del array
+97. **i18next.t() nunca a nivel de módulo** — Llamar siempre dentro de componente/hook (useMemo, render). Fuera del componente falla en producción (funciona en dev por HMR)
+98. **LocaleLink obligatorio en Client Components, `localePath(locale, path)` en Server Components** — Nunca usar `<Link>` de Next.js sin prefijo de locale. Los enlaces internos deben preservar el locale activo (ES/FR/PT)
+99. **MUI imports directos** — `import Button from '@mui/material/Button'`, no `import { Button } from '@mui/material'`. La excepción es `useTheme`, que debe importarse desde `@mui/material` (no desde `@mui/material/styles`)
+100. **Server Components por defecto** — Solo usar `'use client'` cuando sea estrictamente necesario (estado, eventos del DOM, hooks de React que requieren cliente). Si no, dejar el componente como Server Component
+101. **API devuelve `.data`** — Siempre desestructurar el resultado de las llamadas a servicios: `(await SitesService.xxx()).data`. La API retorna `null` en errores; verificar antes de acceder a propiedades anidadas
+102. **`fetch` siempre vía wrapper `api.js`** — Nunca llamar a `fetch()` directamente desde componentes o hooks. Usar `api.get()` / `api.post()` de `src/api/api.js`, que añade Accept-Language, gestiona ISR `revalidate` y maneja errores uniformemente
+103. **ISR revalidate via constantes `REVALIDATE`** — En las llamadas a servicios, pasar uno de los valores de `REVALIDATE` (`SITE: 300`, `CATEGORIES: 300`, `COLLECTIONS: 60`, `POST: 5`). Nunca hardcodear segundos. Si necesitas otro valor, añadirlo a `REVALIDATE` y reutilizar
+104. **Server Components async no se testean en unit** — Si la lógica de un Server Component crece, **factorizarla a hooks o utilidades** que sí sean testables con Vitest. Los Server Components async se cubren con E2E (Playwright), no con Vitest
+105. **MSW intercepta `fetch` en tests** — Los tests unit con MSW activo NO deben mockear `fetch` directamente. Usar fixtures de `tests/fixtures/api/` y, si falta una, crear una nueva fixture explícita en lugar de inline mock dentro del test
+106. **`globalThis.session` reset automático en tests** — `tests/setup.js` lo resetea en cada `beforeEach`. No resetearlo manualmente en los tests. Si un test necesita un locale concreto, llamar `setSession('locale', 'fr')` al inicio del test, no recrear el objeto entero
+
+## Paso 6: Ejecutar tests (solo si el proyecto tiene tests configurados)
+
+Tras la revisión estática (Pasos 1-5), si el proyecto tiene infraestructura de tests, ejecutarlos filtrados por el diff actual para verificar que los cambios no rompen nada y que la cobertura sigue siendo aceptable.
+
+> **⚠️ Paso 6 es incondicional respecto a Paso 5.** Aunque Paso 5 haya reportado incidencias importantes o críticas sobre los cambios (código muerto, over-engineering, etc.), Paso 6 SE EJECUTA igual si hay tests configurados. La razón es que Paso 5, Paso 6 y Paso 7 son **fuentes de información complementarias**: estilo/diseño + ejecución de tests + cobertura. El dev consolida las tres en el reporte final y decide. No omitir Paso 6 porque los cambios "parezcan mejorables" — siempre es informativo conocer si rompen tests o bajan cobertura.
+
+### Detección del runner de tests
+
+Comprobar la presencia de ficheros de configuración:
+
+```bash
+# Backend
+HAS_PEST=$([ -f phpunit.xml ] || [ -f phpunit.xml.dist ] && echo "yes" || echo "no")
+
+# Websites / frontend monorepo
+HAS_VITEST=$([ -f vitest.config.js ] || [ -f vitest.config.mjs ] || [ -f vitest.config.ts ] && echo "yes" || echo "no")
+HAS_PLAYWRIGHT=$([ -f playwright.config.js ] || [ -f playwright.config.ts ] && echo "yes" || echo "no")
+```
+
+Si ninguno está configurado, **omitir la Fase 6 silenciosamente** y continuar a Paso 7. No es error.
+
+### Ejecución por project type
+
+#### project_type = backend (Pest)
+
+1. Derivar el filtro:
+    - Si el diff toca `app/Services/Foo/BarService.php`, filtrar por `tests/Feature/Foo/Bar*Test.php` o `tests/Unit/Foo/Bar*Test.php`
+    - Si el diff toca `app/Models/`, filtrar por `tests/Feature/{Domain}/`
+    - Si no se puede derivar filtro claro, ejecutar suite completa
+2. Ejecutar:
+    ```bash
+    APP_ENV=testing ./vendor/bin/pest --filter="[filtro]" --coverage
+    ```
+3. Capturar exit code y output
+
+#### project_type = websites (Vitest + opcional Playwright)
+
+1. Derivar filtro:
+    - `src/hooks/<X>.js` → `tests/unit/hooks/<X>.test.{js,jsx}`
+    - `src/lib/<X>.js` → `tests/unit/lib/<X>.test.{js,jsx}`
+    - `src/api/services/<X>.js` → `tests/unit/services/<X>.test.{js,jsx}`
+    - `src/components/<dir>/<X>.jsx` → `tests/unit/<dir>/<X>.test.{js,jsx}`
+2. Ejecutar:
+    ```bash
+    npx vitest run --coverage [patrones-derivados]
+    ```
+3. Si `HAS_PLAYWRIGHT=yes` y `tests/e2e/smoke/` no está vacío, ejecutar también:
+    ```bash
+    npx playwright test [specs-relacionadas]
+    ```
+    Si `tests/e2e/smoke/` está vacío (E2E diferidos), omitir Playwright silenciosamente.
+
+#### project_type = frontend (monorepo)
+
+⚠️ **TODO**: pendiente de definir el runner de tests del monorepo cuando el equipo lo configure. Mientras tanto:
+
+```
+echo "🟡 Ejecución de tests para frontend monorepo aún no implementada en esta skill."
+echo "Pendiente del Bloque de testing del monorepo. Omitiendo Fase 6."
+```
+
+Continuar a Paso 7.
+
+#### project_type = mobile
+
+⚠️ **TODO**: pendiente de definir el runner de tests de mobile (probable Jest). Mientras tanto:
+
+```
+echo "🟡 Ejecución de tests para mobile aún no implementada en esta skill."
+echo "Pendiente del Bloque de testing de mobile. Omitiendo Fase 6."
+```
+
+Continuar a Paso 7.
+
+### Interpretación del resultado
+
+- **Todos los tests pasan, exit 0** → Anotar para el reporte final (Paso 8): `Tests: N pasados / N (incluido en sección "Tests")`. Continuar a Paso 7.
+- **Algún test falla** → Anotar fichero:test:error. Generar una propuesta de corrección (qué línea cambiar y cómo). **Preguntar al dev** antes de aplicar:
+    > He detectado N tests fallando tras tus cambios. ¿Quieres que aplique las correcciones propuestas? (s/n)
+
+    Si el dev responde "s", aplicar y re-ejecutar (bucle máximo 3 iteraciones para correcciones de tests pre-existentes). Si tras 3 iter sigue fallando, reportar al dev sin aplicar más cambios y NO continuar a Paso 7.
+- **Tests no ejecutables** (error de configuración, no error de test) → Anotar como anomalía y omitir Paso 7. NO intentar arreglar la configuración.
+
+### Reglas estrictas para esta fase
+
+- **Nunca** modificar el código fuente del proyecto en esta fase. Solo cambios sobre tests pre-existentes que estén fallando.
+- **Nunca** generar tests nuevos aquí — eso es Paso 7.
+- **Nunca** continuar a Paso 7 si Paso 6 falla y el dev no autoriza correcciones.
+- Si el bucle de 3 iter no converge, devolver control al dev sin más intentos.
+
+## Paso 7: Generar tests faltantes (solo si Paso 6 pasó y la cobertura es insuficiente)
+
+Solo se ejecuta esta fase si:
+
+1. Paso 6 pasó verde (todos los tests existentes en verde)
+2. El proyecto tiene un umbral de cobertura configurado y el reporte de cobertura **sobre los ficheros modificados en el diff** está por debajo del umbral
+
+Si la cobertura ya cumple, **omitir Paso 7 silenciosamente** y continuar a Paso 8.
+
+> **⚠️ Paso 7 también es incondicional respecto a Paso 5.** Si Paso 6 pasó verde y hay gap de cobertura, Paso 7 SE EJECUTA aunque Paso 5 haya tachado los cambios como código muerto / over-engineering. La razón es la misma que con Paso 6: el dev necesita la información completa para decidir. Generar tests sobre código que quizá se va a borrar no es desperdicio — el dev verá el reporte completo y decidirá si borra el código o conserva los tests. Caso especial: si el dev finalmente decide borrar el código fuente, también borrará los tests generados — eso es trabajo trivial comparado con la pérdida de información si Paso 7 se hubiera saltado.
+
+### Identificación de gaps
+
+Del reporte de cobertura (generado en Paso 6 con `--coverage`), extraer:
+
+- Ficheros modificados con cobertura por debajo del umbral
+- Funciones y ramas concretas sin cubrir dentro de esos ficheros
+
+### Generación de tests (bucle máx. 3 iteraciones)
+
+Para cada gap detectado:
+
+1. **Leer el código sin cubrir** del fichero fuente
+2. **Leer un test existente del mismo dominio** como referencia de estilo y patrones (estructura `describe()/it()`, uso de fixtures, mocks)
+3. **Generar el test** siguiendo ese patrón. Ubicación según project_type:
+    - backend: `tests/Feature/{Domain}/` o `tests/Unit/{Domain}/`
+    - websites: `tests/unit/{dir}/{filename}.test.{js,jsx}` espejando la ruta de `src/`
+4. **Ejecutar el test recién generado**:
+    - backend: `APP_ENV=testing ./vendor/bin/pest tests/path/to/new-test.php`
+    - websites: `npx vitest run tests/unit/path/to/new-test.{js,jsx}`
+5. **Si pasa** → siguiente gap
+6. **Si falla** → leer error, corregir el test (NUNCA el código fuente), reintentar
+7. **Si tras 3 iter sigue fallando** → reportar al dev sin commit, dejar el test borrador con un comentario `// FIXME: generado por /review, no converge — ver iteración 3`
+
+### Tras procesar todos los gaps
+
+- `git add` de los tests nuevos y modificados
+- **NUNCA** `git commit` ni `git push`
+- Anotar para el reporte final (Paso 8): tests generados, gaps cubiertos, gaps no convergidos
+
+### Reglas estrictas para esta fase
+
+- **Nunca** generar tests sobre código que ya tenía fallos antes de los cambios del dev
+- **Nunca** mockear `fetch` directamente si MSW (websites) o Mocks/Factories (backend) ya están en juego. Usar fixtures existentes o crear nuevas explícitamente
+- **Nunca** generar tests para Server Components async en websites (limitación documentada del runtime — ver F-005 en `desa-websites/docs/superpowers/findings.md`)
+- **Nunca** modificar código de producción para hacer pasar un test generado. Si un test no se puede escribir sin tocar el fuente, abortar ese gap y reportarlo al dev
+- **Usar fixtures de `tests/fixtures/api/` en websites** y factories existentes en backend. NUNCA inline JSON gigante dentro de los tests
+- **Estilo de assertions** debe coincidir con tests existentes del mismo dominio (no introducir `chai`/`should` si el proyecto usa `expect` de vitest, etc.)
+
+## Paso 8: Formato de salida
 
 ```
 ## Revisión de código
@@ -210,6 +376,8 @@ Sin incidencias. Los cambios cumplen con los estándares del equipo.
 ```
 
 ## Reglas estrictas
+
+> Las siguientes reglas aplican al Paso 5 (revisión estática). Para reglas específicas del Paso 6 (ejecutar tests) y Paso 7 (generar tests), ver las "Reglas estrictas" al final de cada uno de esos pasos.
 
 - **Nunca** sugerir añadir comentarios al código
 - **Nunca** sugerir TypeScript. El frontend es JavaScript
