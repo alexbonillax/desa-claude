@@ -280,7 +280,7 @@ Continuar a Paso 7.
 Solo se ejecuta esta fase si:
 
 1. Paso 6 pasó verde (todos los tests existentes en verde)
-2. El proyecto tiene un umbral de cobertura configurado y el reporte de cobertura **sobre los ficheros modificados en el diff** está por debajo del umbral
+2. El reporte de cobertura muestra **líneas nuevas/modificadas del diff sin cubrir** en alguno de los ficheros del diff (independiente de cualquier umbral global del proyecto; en `desa-websites` el gate es de patch coverage por diff, no global)
 
 Si la cobertura ya cumple, **omitir Paso 7 silenciosamente** y continuar a Paso 8.
 
@@ -290,7 +290,7 @@ Si la cobertura ya cumple, **omitir Paso 7 silenciosamente** y continuar a Paso 
 
 Del reporte de cobertura (generado en Paso 6 con `--coverage`), extraer:
 
-- Ficheros modificados con cobertura por debajo del umbral
+- Ficheros modificados con líneas nuevas/modificadas sin cubrir (gap de patch coverage)
 - Funciones y ramas concretas sin cubrir dentro de esos ficheros
 
 ### Generación de tests (bucle máx. 3 iteraciones)
