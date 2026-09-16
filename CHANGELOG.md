@@ -5,6 +5,16 @@ All notable changes to the `desa` plugin will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.10.0] — 2026-09-16
+
+### Added
+
+- **Nueva skill `/desa:triage`** — primera skill de una sesión, anterior a `/desa:plan`. Convierte una petición en una decisión acotada: tamaño del premio, comprobación descalificante, presupuesto declarado y regla de paro. Existe porque el fallo caro no es analizar mal, es analizar mucho lo que no lo merecía. Lleva **15 criterios numerados `[T-1]`-`[T-15]`**, todos derivados de fallos reales medidos, citables como los `#N` de `/desa:review`.
+- **Presupuesto declarado con topes duros** en `/desa:triage` — tres niveles (directo 0 agentes / acotado ≤3 / fan-out ≤8 con veto del usuario) y una línea visible antes de gastar. El tope es **total, no por rama** `[T-5]`: un `slice(0, 6)` sobre 4 ramas son 24 agentes.
+- **Salida de emergencia para tareas triviales** `[T-1]` — el Paso 1 clasifica la petición en implementación de alcance claro (triage de 3 líneas y a `/desa:plan`), síntoma (disciplina de medición) o decisión (sólo la comprobación descalificante). Sin eso, la skill se convertiría en la ceremonia que pretende evitar.
+- **Disciplina de medición** `[T-9]`-`[T-12]` — prohibido presentar una resta como medición, comprobar que se mide la capa correcta (`php -i` informa del SAPI de CLI, no del de FPM), A/B en el mismo proceso con control en la misma ventana, y tres hipótesis refutadas en la misma capa como señal de cambiar de capa.
+- **Separación obligatoria entre medido y razonado** `[T-13]` y prueba del camino infeliz antes de proponer `[T-14]` — sin filtros, sin includes, con cero filas y con el principal más restringido.
+
 ## [1.9.1] — 2026-06-05
 
 ### Changed
