@@ -5,6 +5,29 @@ All notable changes to the `desa` plugin will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.13.0] — 2026-09-28
+
+### Fixed
+
+- **Paso 6 de `/desa:review` en los backends reales** — la skill buscaba `./vendor/bin/pest` porque existía `phpunit.xml`, pero grupodesa-backend, grupodesa-api, gdapps y desa-connect solo tienen PHPUnit (7.5 a 11.5), así que el Paso 6 acababa siempre en «no ejecutables». Además, pasaba rutas a `--filter`, que compara nombres de test: PHPUnit respondía «No tests executed!» con exit 0, un falso verde. Ahora un script nuevo, `plugins/desa/scripts/test-context.sh` (22 pruebas en `tests/test-context.test.sh`), detecta el runner por lo instalado (`pest` o `phpunit`, `vitest`) y el driver de cobertura por los módulos de PHP (`xdebug`, `pcov`) o los paquetes (`@vitest/coverage-v8`). Los ficheros de test van como argumentos posicionales, y la cobertura de backend, solo con driver y a un fichero fuera del repo (`--coverage-clover`).
+- **Sin suite completa ni directorios en backend** — si no podía derivar un filtro, la skill lanzaba la suite entera. En grupodesa-backend eso es peligroso: `phpunit.xml` fija `APP_ENV=testing` sin `force`, así que manda el shell, y un directorio con `RefreshDatabase` bajo `APP_ENV=local` hizo `migrate:fresh` contra producción (31-07-2026). Ahora se ejecuta siempre con `APP_ENV=testing`, solo sobre ficheros de test concretos, y si no hay ninguno, `Tests: sin test asociado al diff`. En websites, sin test asociado se ejecuta la suite unitaria entera, que usa jsdom y MSW, para que el Paso 7 tenga cobertura. Los tests que según el `CLAUDE.md` necesitan la BD real no se ejecutan desde la revisión.
+- **Tests que fallan** — la única corrección permitida era tocar el test, lo que empujaba a hacer pasar una regresión, y la pregunta (s/n) llegaba antes del informe. Ahora cada fallo se diagnostica como regresión (incidencia Crítica, con la corrección propuesta en el código) o como test desactualizado. No se toca nada durante la revisión, y las correcciones van a un bloque «Acciones propuestas» al final del informe, donde el dev elige cuáles aplicar.
+- **Paso 7** —
+  - un borrador que no converge se borra del árbol y va al informe con su error: ya no se dejan tests rojos con `// FIXME` ni se stagean;
+  - `git add` solo toca los tests que ha creado la skill y los que no tenían cambios del dev, para no stagear hunks ajenos;
+  - los tests generados no pueden usar `RefreshDatabase` ni `DatabaseMigrations`;
+  - en websites, si la fuente es una rama, los huecos se sacan con el `scripts/diff-coverage.mjs` del proyecto, el mismo gate que CI;
+  - el test nuevo va junto a sus vecinos de `tests/unit/`, en vez de «espejando `src/`», que no coincide con la estructura real.
+
+### Changed
+
+- La tabla de valores de la línea `Tests` añade `sin test asociado al diff`, `· C tests existentes corregidos` y `· R requieren BD real, no ejecutados`, y la de Cobertura, `no evaluada (…)` cuando el Paso 6 no deja seguir.
+- `allowed-tools` de `/desa:review` preaprueba también `bash ${CLAUDE_PLUGIN_ROOT}/scripts/test-context.sh`, que solo lee. Los runners siguen pidiendo permiso a propósito.
+
+### Notes
+
+- Es el bloque 3 de la auditoría. Hoy ningún backend tiene driver de cobertura, así que ahí el Paso 7 no se ejecuta: el informe lo dirá como `Cobertura del diff: no disponible (sin xdebug ni pcov)`.
+
 ## [1.12.0] — 2026-09-28
 
 ### Fixed

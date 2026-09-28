@@ -1,7 +1,7 @@
 ---
 description: Revisar código aplicando los estándares del equipo antes de commit o PR
 argument-hint: [ruta de archivo, número de PR (#42), vacío para cambios locales, --verbose]
-allowed-tools: Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/diff-context.sh:*), Bash(gh pr diff:*), Read, Grep, Glob
+allowed-tools: Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/diff-context.sh:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/test-context.sh), Bash(gh pr diff:*), Read, Grep, Glob
 ---
 
 # Review — Revisión de código con estándares Grupo Desa
@@ -191,49 +191,40 @@ Tras la revisión estática (Pasos 1-5), si el proyecto tiene infraestructura de
 
 ### Detección del runner de tests
 
-Comprobar la presencia de ficheros de configuración:
-
 ```bash
-# Backend
-HAS_PEST=$([ -f phpunit.xml ] || [ -f phpunit.xml.dist ] && echo "yes" || echo "no")
-
-# Websites / frontend monorepo
-HAS_VITEST=$([ -f vitest.config.js ] || [ -f vitest.config.mjs ] || [ -f vitest.config.ts ] && echo "yes" || echo "no")
-HAS_PLAYWRIGHT=$([ -f playwright.config.js ] || [ -f playwright.config.ts ] && echo "yes" || echo "no")
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/test-context.sh
 ```
 
-Si ninguno está configurado, anotar `Tests: sin runner configurado` para el Paso 8 y continuar al Paso 7. No es error.
+Imprime `STACK`, `RUNNER` (`pest`, `phpunit`, `vitest`, `no-instalado` o `ninguno`), `COBERTURA` (`xdebug`, `pcov`, `v8`, `istanbul` o `ninguna`), `PLAYWRIGHT`, `E2E_SMOKE` (specs en `tests/e2e/smoke`) y `DIFF_COVERAGE` (si el proyecto tiene `scripts/diff-coverage.mjs`). El runner sale de lo que está instalado, no de que exista `phpunit.xml`.
+
+- `RUNNER=ninguno` → anotar `Tests: sin runner configurado` y continuar al Paso 7. No es error.
+- `RUNNER=no-instalado` → anotar `Tests: no ejecutables (runner configurado pero no instalado)` y omitir el Paso 7.
 
 ### Ejecución por project type
 
-#### project_type = backend (Pest)
+#### project_type = backend (PHPUnit o Pest)
 
-1. Derivar el filtro:
-    - Si el diff toca `app/Services/Foo/BarService.php`, filtrar por `tests/Feature/Foo/Bar*Test.php` o `tests/Unit/Foo/Bar*Test.php`
-    - Si el diff toca `app/Models/`, filtrar por `tests/Feature/{Domain}/`
-    - Si no se puede derivar filtro claro, ejecutar suite completa
-2. Ejecutar:
+Siempre con `APP_ENV=testing` delante y siempre con ficheros de test concretos, nunca un directorio ni la suite completa. Motivo: `phpunit.xml` declara `APP_ENV=testing` sin `force`, así que el valor lo decide el shell; con otro `APP_ENV`, Laravel puede cargar `.env` y apuntar a la BD real, y en grupodesa-backend lanzar un directorio con `RefreshDatabase` hizo `migrate:fresh` contra producción (31-07-2026).
+
+1. Derivar los ficheros de test del diff con Glob: para `app/Services/Foo/BarService.php`, los `tests/Feature/Foo/Bar*Test.php` y `tests/Unit/Foo/Bar*Test.php` que existan; un fichero de test del diff cuenta por sí mismo. Si no sale ninguno, no ejecutar nada y anotar `Tests: sin test asociado al diff`.
+2. Si el `CLAUDE.md` del proyecto dice que un test necesita otro `APP_ENV` o la BD real (en grupodesa-backend, los feature tests de precios y pedidos), no ejecutarlo desde la revisión: anotarlo como `requiere BD real, no ejecutado`.
+3. Escribir el comando exacto y ejecutarlo, con los ficheros como argumentos posicionales:
     ```bash
-    APP_ENV=testing ./vendor/bin/pest --filter="[filtro]" --coverage
+    APP_ENV=testing ./vendor/bin/{RUNNER} tests/Feature/Foo/BarServiceTest.php tests/Unit/Foo/BarTest.php
     ```
-3. Capturar exit code y output
+    Nunca pasar rutas en `--filter`: compara nombres de test, no rutas, y con una ruta no ejecuta nada y sale con 0.
+    Cobertura solo si `COBERTURA` es `xdebug` o `pcov`: añadir `--coverage-clover "$TMPDIR/desa-review-coverage.xml"` (vale para PHPUnit y Pest, y deja el informe fuera del repo). Si es `ninguna`, anotar `Cobertura del diff: no disponible (sin xdebug ni pcov)`: el Paso 7 no se ejecuta.
+4. Capturar exit code y output, y contar pasados, saltados y fallidos. Con `APP_ENV=testing`, los tests que necesitan MySQL se saltan por su guard: cuentan como saltados, no como pasados.
 
 #### project_type = websites (Vitest + opcional Playwright)
 
-1. Derivar filtro:
-    - `src/hooks/<X>.js` → `tests/unit/hooks/<X>.test.{js,jsx}`
-    - `src/lib/<X>.js` → `tests/unit/lib/<X>.test.{js,jsx}`
-    - `src/api/services/<X>.js` → `tests/unit/services/<X>.test.{js,jsx}`
-    - `src/components/<dir>/<X>.jsx` → `tests/unit/<dir>/<X>.test.{js,jsx}`
+1. Derivar los tests del diff buscando por nombre con Glob: para `src/**/<X>.{js,jsx}`, `tests/unit/**/<X>.test.{js,jsx}`. Un fichero de test del diff cuenta por sí mismo. Si no sale ninguno, ejecutar la suite unitaria entera sin filtro: en websites es segura (jsdom y MSW, sin BD ni red real) y así el Paso 7 tiene la cobertura de los ficheros del diff. Anotar `Tests: sin test asociado al diff`, seguido del resultado de la suite.
 2. Ejecutar:
     ```bash
-    npx vitest run --coverage [patrones-derivados]
+    npx vitest run --coverage [ficheros-de-test, o nada para la suite unitaria]
     ```
-3. Si `HAS_PLAYWRIGHT=yes` y `tests/e2e/smoke/` no está vacío, ejecutar también:
-    ```bash
-    npx playwright test [specs-relacionadas]
-    ```
-    Si `tests/e2e/smoke/` está vacío (E2E diferidos), omitir Playwright y anotarlo en la línea de Tests (`E2E: sin specs`).
+    Sin `COBERTURA` (`ninguna`), ejecutar sin `--coverage` y anotar `Cobertura del diff: no disponible`.
+3. Si `PLAYWRIGHT=si` y hay specs de `tests/e2e/smoke/` relacionadas con el diff, ejecutar también `npx playwright test [specs]`. Si `E2E_SMOKE=0`, omitir Playwright y anotarlo en la línea de Tests (`E2E: sin specs`).
 
 #### project_type = frontend (monorepo) y mobile
 
@@ -242,18 +233,19 @@ El equipo aún no ha definido el runner de tests del monorepo ni el de mobile (p
 ### Interpretación del resultado
 
 - **Todos los tests pasan, exit 0** → Anotar para la línea `Tests` del Paso 8: `N pasados · M saltados · K fallidos`, con el comando usado. Si el runner no ha ejecutado ningún test («No tests executed!», 0 tests), no es verde: anotar `Tests: 0 ejecutados` y el motivo. Continuar al Paso 7.
-- **Algún test falla** → Anotar fichero:test:error. Generar una propuesta de corrección (qué línea cambiar y cómo). **Preguntar al dev** antes de aplicar:
-    > He detectado N tests fallando tras tus cambios. ¿Quieres que aplique las correcciones propuestas? (s/n)
+- **Algún test falla** → Anotar `fichero:test:error` y, por cada test que falla, diagnosticar antes de proponer nada:
+    - **Regresión**: el cambio rompe un comportamiento que el test protege. Es una incidencia **Crítica** del informe, y la acción propuesta es corregir el código fuente, no el test.
+    - **Test desactualizado**: el cambio de comportamiento es intencionado (lo dicen el diff, el mensaje del commit o el usuario). La acción propuesta es actualizar el test.
 
-    Si el dev responde "s", aplicar y re-ejecutar (bucle máximo 3 iteraciones para correcciones de tests pre-existentes). Si tras 3 iter sigue fallando, reportar al dev sin aplicar más cambios y NO continuar a Paso 7.
+    No tocar nada durante la revisión. Las correcciones van al bloque «Acciones propuestas» del Paso 8, al final del informe completo, y el fallo se queda en el informe aunque después se corrija. Si el dev acepta actualizar tests, aplicarlo y volver a ejecutar (máximo 3 iteraciones); si vuelve a verde, seguir con el Paso 7 y actualizar el informe. Si tras 3 iteraciones sigue fallando, devolver el control al dev sin más cambios.
 - **Tests no ejecutables** (error de configuración, no error de test) → Anotar `Tests: no ejecutables ({motivo})` y omitir Paso 7. NO intentar arreglar la configuración.
 
 ### Reglas estrictas para esta fase
 
-- **Nunca** modificar el código fuente del proyecto en esta fase. Solo cambios sobre tests pre-existentes que estén fallando.
+- **Nunca** modificar el código fuente del proyecto en esta fase. Una regresión se reporta como Crítica con la corrección propuesta. Solo se aplica si el dev la elige en «Acciones propuestas», al final del informe.
 - **Nunca** generar tests nuevos aquí — eso es Paso 7.
-- **Nunca** continuar a Paso 7 si Paso 6 falla y el dev no autoriza correcciones.
-- Si el bucle de 3 iter no converge, devolver control al dev sin más intentos.
+- **Nunca** continuar a Paso 7 mientras haya tests fallando.
+- **Nunca** ejecutar un directorio, una suite completa ni un `APP_ENV` distinto de `testing` en backend.
 
 ## Paso 7: Generar tests faltantes (solo si Paso 6 pasó y la cobertura es insuficiente)
 
@@ -262,36 +254,40 @@ Solo se ejecuta esta fase si:
 1. Paso 6 pasó verde (todos los tests existentes en verde)
 2. El reporte de cobertura muestra **líneas nuevas/modificadas del diff sin cubrir** en alguno de los ficheros del diff (independiente de cualquier umbral global del proyecto; en `desa-websites` el gate es de patch coverage por diff, no global)
 
-Si no hay líneas del diff sin cubrir, anotar `Cobertura del diff: sin líneas sin cubrir` y continuar al Paso 8. Si el Paso 6 no dio cobertura (sin runner, sin driver o tests omitidos), anotar `Cobertura del diff: no disponible`.
+Si no hay líneas del diff sin cubrir, anotar `Cobertura del diff: sin líneas sin cubrir` y continuar al Paso 8. Si el Paso 6 no dio cobertura (sin runner, sin driver o tests omitidos), anotar `Cobertura del diff: no disponible ({motivo})`. Si el Paso 6 acabó en rojo, con tests no ejecutables o con 0 tests ejecutados, anotar `Cobertura del diff: no evaluada ({motivo})`.
 
 > **⚠️ Paso 7 también es incondicional respecto a Paso 5.** Si Paso 6 pasó verde y hay gap de cobertura, Paso 7 SE EJECUTA aunque Paso 5 haya tachado los cambios como código muerto / over-engineering. La razón es la misma que con Paso 6: el dev necesita la información completa para decidir. Generar tests sobre código que quizá se va a borrar no es desperdicio — el dev verá el reporte completo y decidirá si borra el código o conserva los tests. Caso especial: si el dev finalmente decide borrar el código fuente, también borrará los tests generados — eso es trabajo trivial comparado con la pérdida de información si Paso 7 se hubiera saltado.
 
 ### Identificación de gaps
 
-Del reporte de cobertura (generado en Paso 6 con `--coverage`), extraer:
+- **websites con `DIFF_COVERAGE=si` y `FUENTE=rama:{base}...HEAD`**: usar el script del propio proyecto, que es el mismo gate que aplica CI (80 % de las líneas nuevas):
+    ```bash
+    DIFF_COVERAGE_BASE={base} node scripts/diff-coverage.mjs
+    ```
+    Lista, por fichero, las líneas nuevas sin cubrir. Solo mira cambios commiteados, así que no sirve con `FUENTE=staged` o `unstaged`.
+- **En el resto de casos**, cruzar el informe de cobertura del Paso 6 (`coverage/lcov.info` en websites, `$TMPDIR/desa-review-coverage.xml` en backend) con las líneas añadidas del diff (`DIFF` con `--unified=0`).
 
-- Ficheros modificados con líneas nuevas/modificadas sin cubrir (gap de patch coverage)
-- Funciones y ramas concretas sin cubrir dentro de esos ficheros
+De ahí salen los ficheros con líneas nuevas o modificadas sin cubrir, y las funciones y ramas concretas que faltan.
 
 ### Generación de tests (bucle máx. 3 iteraciones)
 
 Para cada gap detectado:
 
 1. **Leer el código sin cubrir** del fichero fuente
-2. **Leer un test existente del mismo dominio** como referencia de estilo y patrones (estructura `describe()/it()`, uso de fixtures, mocks)
-3. **Generar el test** siguiendo ese patrón. Ubicación según project_type:
-    - backend: `tests/Feature/{Domain}/` o `tests/Unit/{Domain}/`
-    - websites: `tests/unit/{dir}/{filename}.test.{js,jsx}` espejando la ruta de `src/`
-4. **Ejecutar el test recién generado**:
-    - backend: `APP_ENV=testing ./vendor/bin/pest tests/path/to/new-test.php`
-    - websites: `npx vitest run tests/unit/path/to/new-test.{js,jsx}`
+2. **Leer un test existente del mismo dominio** como referencia de estilo y patrones (estructura `describe()/it()`, uso de fixtures, mocks). En backend, seguir los moldes que dé el `CLAUDE.md` del proyecto (en grupodesa-backend, el unitario sin BD de `tests/Unit/Shared/RegionTest` con la conexión bloqueada)
+3. **Generar el test** siguiendo ese patrón. Si el fichero fuente ya tiene test, añadir el caso ahí. Si no, crear uno nuevo junto a los tests vecinos del mismo directorio:
+    - backend: `tests/Unit/{Domain}/` o `tests/Feature/{Domain}/`
+    - websites: el directorio de `tests/unit/` donde están los tests de ficheros vecinos (p. ej. `tests/unit/hooks/` para `src/hooks/`)
+4. **Ejecutar el test recién generado** con el mismo runner y las mismas reglas del Paso 6:
+    - backend: `APP_ENV=testing ./vendor/bin/{RUNNER} tests/ruta/NuevoTest.php`
+    - websites: `npx vitest run tests/unit/ruta/nuevo.test.{js,jsx}`
 5. **Si pasa** → siguiente gap
 6. **Si falla** → leer error, corregir el test (NUNCA el código fuente), reintentar
-7. **Si tras 3 iter sigue fallando** → reportar al dev sin commit, dejar el test borrador con un comentario `// FIXME: generado por /review, no converge — ver iteración 3`
+7. **Si tras 3 iter sigue fallando** → borrar el borrador del árbol y llevarlo al informe con el último error. No dejar en el repo tests rojos ni comentarios `FIXME`
 
 ### Tras procesar todos los gaps
 
-- `git add` de los tests nuevos y modificados
+- `git add` solo de los ficheros de test que ha creado la skill, y de los que ha modificado si antes no tenían cambios del dev (comprobarlo con `git status --porcelain -- {fichero}` antes de tocarlos). Si un test ya tenía cambios del dev, dejarlo sin stagear y listarlo: un `git add` metería también hunks que el dev no quería
 - **NUNCA** `git commit` ni `git push`
 - Anotar para la línea `Cobertura del diff` del Paso 8: líneas sin cubrir, tests generados y gaps que no han convergido
 
@@ -303,6 +299,7 @@ Para cada gap detectado:
 - **Nunca** modificar código de producción para hacer pasar un test generado. Si un test no se puede escribir sin tocar el fuente, abortar ese gap y reportarlo al dev
 - **Usar fixtures de `tests/fixtures/api/` en websites** y factories existentes en backend. NUNCA inline JSON gigante dentro de los tests
 - **Estilo de assertions** debe coincidir con tests existentes del mismo dominio (no introducir `chai`/`should` si el proyecto usa `expect` de vitest, etc.)
+- **Nunca** usar `RefreshDatabase` ni `DatabaseMigrations` en un test generado: lanzan `migrate:fresh` sobre la BD que haya configurada, y en algún proyecto esa BD es la de producción
 
 ## Paso 8: Formato de salida
 
@@ -338,6 +335,17 @@ Para cada gap detectado:
 **Resumen**: X críticos · Y importantes · Z menores
 ```
 
+Si el Paso 6 dejó correcciones pendientes (tests en rojo), añadir tras el Resumen un bloque con las acciones numeradas, y preguntar al final cuáles aplicar:
+
+```
+### Acciones propuestas
+
+1. **Regresión** en `fichero:línea` (rompe `Test::test_x`) → corregir el código: {cambio}
+2. **Test desactualizado** `Test::test_y` por el cambio intencionado de {…} → actualizar el test: {cambio}
+
+¿Aplico alguna? Indica los números.
+```
+
 Si modo verbose (`--verbose` o `-v`), añadir al final:
 
 ```
@@ -350,9 +358,10 @@ Valores de las líneas `Tests` y `Cobertura del diff`:
 
 | Línea | Valor | Cuándo |
 |---|---|---|
-| Tests | `N pasados · M saltados · K fallidos` | se ejecutaron tests; añadir ` · C tests existentes corregidos` si el bucle del Paso 6 los modificó |
+| Tests | `N pasados · M saltados · K fallidos` | se ejecutaron tests; añadir ` · C tests existentes corregidos` si el bucle del Paso 6 los modificó, y ` · R requieren BD real, no ejecutados` si hubo alguno |
 | Tests | `0 ejecutados ({motivo})` | el runner no ejecutó ninguno: no es verde |
 | Tests | `sin runner configurado` · `sin runner para este stack` | no hay runner (Paso 6) |
+| Tests | `sin test asociado al diff` | no hay ningún test de los ficheros del diff |
 | Tests | `no ejecutables ({motivo})` | error de configuración, no de test |
 | Tests | `omitidos (la PR #N no está en el working tree)` | modo PR con `PR_EN_WORKTREE=no` |
 | Cobertura del diff | `sin líneas sin cubrir` | el Paso 7 no encontró huecos |

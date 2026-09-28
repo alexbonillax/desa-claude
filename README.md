@@ -51,7 +51,7 @@ Revisa código antes de commits o PRs aplicando los estándares del equipo. Dete
 /desa:review --verbose             # añade las incidencias descartadas por baja confianza
 ```
 
-Reporta incidencias agrupadas por severidad (Crítico / Importante / Menor) con referencia a fichero y línea. Después ejecuta los tests del proyecto y, si hay líneas nuevas sin cubrir, genera tests y los deja en staging, sin commit. La cabecera del informe dice siempre qué se revisó, qué tests se ejecutaron y la cobertura del diff, también cuando no se pudo ejecutar nada.
+Reporta incidencias agrupadas por severidad (Crítico / Importante / Menor) con referencia a fichero y línea. Después ejecuta los tests de los ficheros del diff. En backend, siempre con `APP_ENV=testing` y nunca la suite entera ni un directorio. Si un test falla, dice si es una regresión o un test desactualizado y propone la corrección al final del informe sin tocar nada. Si hay líneas nuevas sin cubrir, genera tests y deja en staging solo los ficheros que crea, sin commit. La cabecera del informe dice siempre qué se revisó, qué tests se ejecutaron y la cobertura del diff, también cuando no se pudo ejecutar nada.
 
 ## Mantenimiento: `allowed-tools`
 
