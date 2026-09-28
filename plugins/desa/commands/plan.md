@@ -1,7 +1,7 @@
 ---
 description: Planificar una tarea con exploración, review-awareness y 3 iteraciones de mejora antes de implementar
 argument-hint: [descripción de la tarea]
-allowed-tools: Bash(git:*), Read, Grep, Glob, Task, Write
+allowed-tools: Read, Grep, Glob, Agent
 ---
 
 # Plan — Planificación con estándares Grupo Desa

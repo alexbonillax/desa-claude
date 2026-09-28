@@ -1,6 +1,7 @@
 ---
 description: Actualizar el plugin Desa a la última versión
-allowed-tools: Bash(claude:*)
+allowed-tools: Bash(claude plugin marketplace update desa), Bash(claude plugin update desa@desa)
+disable-model-invocation: true
 ---
 
 # Update — Actualizar plugin Desa

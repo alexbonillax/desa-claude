@@ -64,13 +64,13 @@ Si el resultado está vacío (no hay token guardado):
 | POST | `/documents/{id}` | Actualizar documento |
 | DELETE | `/documents/{id}` | Soft delete |
 
-Las respuestas POST devuelven el documento completo. Extraer el campo `id` del body para usarlo en la verificación posterior (`GET /documents/{id}`).
+Las respuestas POST devuelven el documento completo. Extraer el campo `id` del body para usarlo en la verificación posterior (`GET /documents/{id}?include=teams,roles`, paso 6 del flujo de documentar).
 
 **DELETE requiere confirmación explícita**: antes de ejecutar cualquier DELETE, mostrar al usuario el título del documento y pedir confirmación. Aunque es soft delete (recuperable por administración), el usuario debe aprobarlo explícitamente.
 
 ### Paginación
 
-Los endpoints GET devuelven resultados paginados (por defecto 25 por página). Si un nodo tiene muchos hijos o hay muchos resultados de búsqueda, añadir `&perPage=100` para obtener más en una sola llamada. Ejemplo:
+Los endpoints GET devuelven resultados paginados, por defecto solo 5 por página. En búsquedas y listados de hijos, añadir siempre `&perPage=100` y mirar `meta.has_more_pages`: con 5 por página, un documento que existe pero cae en la página 2 se toma por inexistente y se crea un duplicado. Ejemplo:
 
 ```
 GET /documents?filter[document]={id}&include=documents&perPage=100
@@ -78,9 +78,13 @@ GET /documents?filter[document]={id}&include=documents&perPage=100
 
 ### Includes disponibles
 
-`document` (padre recursivo hasta root), `documents` (hijos), `teams`, `roles`, `status`, `creator`, `updater`
+`document` (padre recursivo hasta root), `documents` (hijos), `teams`, `roles`, `creator`
+
+No usar `status`: los documentos no tienen estado y ese include devuelve 500. El estado de publicación va en `fields.is_published`.
 
 ## Formato de petición (crear/actualizar)
+
+Ejemplo al crear un documento. `TEAMS_DEL_PADRE` y `ROLES_DEL_PADRE` son los IDs que devuelve `GET /documents/{padre}?include=teams,roles`:
 
 ```json
 {
@@ -92,18 +96,20 @@ GET /documents?filter[document]={id}&include=documents&perPage=100
     "searchable_tags": "palabra1, palabra2, palabra3",
     "is_published": true
   },
-  "teams": [],
-  "roles": []
+  "teams": [TEAMS_DEL_PADRE],
+  "roles": [ROLES_DEL_PADRE]
 }
 ```
 
 - `document_id`: ID del padre (obligatorio)
 - `description`: resumen breve del contenido (max 255 caracteres). Siempre rellenarlo
 - `content`: markdown libre, puede ser null
-- `searchable_tags`: palabras clave separadas por coma que facilitan la búsqueda fulltext. El título se añade automáticamente, no hace falta repetirlo. Incluir: nombres de tecnologías, conceptos clave, siglas, términos de negocio relevantes. **Siempre rellenarlo** al crear o actualizar un documento
-- `is_published`: usar siempre `true`. Solo `false` si el usuario pide explícitamente guardar un borrador
-- `teams: []` y `roles: []` → documento público para todos los empleados
+- `searchable_tags`: palabras clave separadas por coma que facilitan la búsqueda fulltext. El título se añade automáticamente, no hace falta repetirlo. Incluir: nombres de tecnologías, conceptos clave, siglas, términos de negocio relevantes. **Siempre rellenarlo** al crear o actualizar un documento. El GET no lo devuelve: al actualizar, reescribirlo completo (si se omite, se regenera solo a partir del título y la descripción)
+- `is_published`: al crear, `true` salvo que el usuario pida explícitamente guardar un borrador. Al actualizar, conservar el valor que tenía (si se omite, pasa a `false`)
+- `teams` y `roles`: arrays de IDs (el `id` de cada objeto que devuelve `?include=teams,roles`). `roles` son los roles que pueden ver la página: con `roles: []` solo la ve super-admin. `teams` la restringe además por equipo: con `teams: []` queda abierta a todos los equipos. Al crear, copiar los dos del padre salvo que el usuario pida otra visibilidad
 - Root (id=1) NO se puede editar vía API
+
+**Al actualizar se conserva la visibilidad.** Leer antes con `GET /documents/{id}?include=teams,roles` y enviar en `teams` y `roles` los IDs que devuelva esa lectura, y en `document_id` e `is_published` los valores leídos. Motivo: el POST sustituye `teams` y `roles` por lo que se envía. Enviar `[]` borraría los equipos y roles de la página, y dejaría de verla todo el que no sea super-admin; quien escribe siempre lo es (la API lo exige), así que no lo notaría. Y `true` publicaría un borrador. Si `fields.is_public` es `false` pero `teams` viene vacío (sus equipos se han borrado), no enviar el POST sin avisar antes al usuario y preguntarle qué equipos poner: cualquier POST la dejaría abierta a todos los equipos. Solo se cambian visibilidad, padre o estado de publicación si el usuario lo pide explícitamente.
 
 ## Formato del contenido
 
@@ -168,30 +174,30 @@ Palabras que frecuentemente se escriben sin tilde por error:
 
 ## Flujo de trabajo para consultas
 
-1. **Buscar**: `GET /documents?filter[search]=texto` — si la consulta es sobre un concepto, sistema o proceso concreto, empezar aquí
+1. **Buscar**: `GET /documents?filter[search]=texto&perPage=100` — si la consulta es sobre un concepto, sistema o proceso concreto, empezar aquí
 2. **Si la búsqueda no es fructífera o la consulta es exploratoria**: `GET /documents/root?include=documents` para ver la estructura general
-3. **Navegar**: `GET /documents?filter[document]={id}&include=documents` para profundizar en un nodo
+3. **Navegar**: `GET /documents?filter[document]={id}&include=documents&perPage=100` para profundizar en un nodo
 4. **Leer**: `GET /documents/{id}` para ver el contenido completo
 5. **Resumir**: Presenta la información al usuario de forma clara y concisa
 
 ## Flujo de trabajo para documentar
 
-1. **Buscar primero**: `GET /documents?filter[search]=palabras_clave` — verificar si ya existe documentación sobre el tema. Si existe, continuar como **actualización** del documento encontrado; si no, continuar como **creación**
+1. **Buscar primero**: `GET /documents?filter[search]=palabras_clave&perPage=100` — verificar si ya existe documentación sobre el tema. Si existe, continuar como **actualización** del documento encontrado; si no, continuar como **creación**
 2. **Explorar**: `GET /documents/root?include=documents` para entender la estructura y determinar dónde debe vivir el nuevo contenido
-3. **Navegar**: `GET /documents?filter[document]={id}&include=documents` para localizar el nodo padre correcto
-4. **Leer**: `GET /documents/{id}` — obligatorio antes de cualquier escritura. Al actualizar: leer el documento completo para preservar el contenido existente. Al crear: leer el padre para entender el contexto
+3. **Navegar**: `GET /documents?filter[document]={id}&include=documents&perPage=100` para localizar el nodo padre correcto
+4. **Leer**: `GET /documents/{id}` — obligatorio antes de cualquier escritura. Al actualizar: `GET /documents/{id}?include=teams,roles`, para preservar el contenido y la visibilidad existentes. Al crear: leer el padre con `?include=teams,roles` para entender el contexto y heredar su visibilidad. En los dos casos, si `roles` viene vacío (la página solo la ve super-admin, probablemente porque se creó con una versión anterior de esta skill), o si `fields.is_public` es `false` y `teams` viene vacío (sus equipos se han borrado), no copiar esa visibilidad en silencio: avisar al usuario y preguntar qué equipos y roles poner. Quien escribe siempre es super-admin, así que no lo notaría
 5. **Revisar ortografía**: Antes de enviar, repasa title, description y content buscando palabras sin tilde. Consulta la tabla de la sección "Ortografía" y corrige. Este paso es obligatorio
 
 **Si creas** un documento nuevo:
 - Identificar el `document_id` del padre en el paso 3
-- `POST /documents/new` con todos los campos, incluyendo `document_id`
+- `POST /documents/new` con todos los campos, incluyendo `document_id`, y con `teams` y `roles` del padre
 - Si es documentación de lógica de negocio, seguir también el flujo de **Referencias cruzadas** (sección «Estructura de la wiki») para enlazarlo desde el eje de negocio y actualizar el índice de la aplicación
 
 **Si actualizas** un documento existente:
 - Enviar TODOS los campos con el contenido completo. Los campos omitidos o con `null` borran el contenido
-- `POST /documents/{id}` con el body completo leído en el paso 4 más los cambios aplicados
+- `POST /documents/{id}` con el body completo leído en el paso 4 más los cambios aplicados, incluidos `document_id`, `is_published`, `teams` y `roles` tal como estaban
 
-6. **Verificar**: `GET /documents/{id}` para confirmar que el resultado es el esperado
+6. **Verificar**: `GET /documents/{id}?include=teams,roles` para confirmar que el resultado es el esperado: al actualizar, que `teams`, `roles` y `fields.is_public` no han cambiado; al crear, que `roles` no ha quedado vacío salvo que el usuario lo pidiera
 
 ## Estructura de la wiki
 
@@ -230,8 +236,8 @@ La documentación de lógica de negocio vive bajo la **aplicación correspondien
 
 1. **Identificar** en qué aplicación reside la lógica (backend, frontend, Desa Connect, etc.)
 2. **Crear** la página bajo la sección Lógica de Negocio de esa aplicación, con lenguaje no técnico, sin código
-3. **Enlazar** desde la página del flujo de negocio correspondiente (Ventas, Centro Logístico, etc.)
-4. **Actualizar** la página índice de Lógica de Negocio de la aplicación con el nuevo enlace
+3. **Enlazar** desde la página del flujo de negocio correspondiente (Ventas, Centro Logístico, etc.). Es una actualización: seguir «Si actualizas» y conservar su visibilidad
+4. **Actualizar** la página índice de Lógica de Negocio de la aplicación con el nuevo enlace, también como actualización
 
 **Ejemplo**: La lógica de pedidos (id: 34) está bajo Desaverse Backend > Lógica de Negocio (id: 33), y Ventas (id: 11) la enlaza como referencia cruzada.
 
@@ -251,7 +257,7 @@ Las páginas de Lógica de Negocio están orientadas a perfiles no técnicos (di
 
 ## Regla de oro al actualizar
 
-`POST /documents/{id}` reemplaza el documento completo. Un campo omitido o `null` borra su contenido. **Siempre leer antes de actualizar** (paso 4 del flujo de documentar) y enviar el body completo con los cambios aplicados encima.
+`POST /documents/{id}` reemplaza el documento completo. Un campo omitido o `null` borra su contenido. **Siempre leer antes de actualizar** (paso 4 del flujo de documentar) y enviar el body completo con los cambios aplicados encima, visibilidad incluida.
 
 ## Importante
 

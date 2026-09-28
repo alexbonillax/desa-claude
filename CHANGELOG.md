@@ -5,6 +5,41 @@ All notable changes to the `desa` plugin will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.11.0] — 2026-09-28
+
+### Fixed
+
+- **Escapado PHP en `/desa:translations`** — la regla escapaba `"` y `\` pero no `$`, y no fijaba el orden. Aplicada al pie de la letra (`"` antes que `\`), duplica la barra de `\"` y el fichero deja de parsear. Ahora el orden es `\` → `\\`, `"` → `\"`, `$` → `\$`, en claves y valores, con una función `php_str()` de referencia que también usa el paso 9 de crear o actualizar. Para reescribir un fichero, sus valores actuales se cargan con PHP, no del texto fuente, para no escaparlos dos veces. La plantilla de paginación pasa de `python3 -c "…"` a un heredoc `python3 - <<'PY'`, porque dentro de comillas dobles bash destroza `php_str()` sin dar error. Con la regla antigua, un `$currency` en un valor tumbaba el namespace entero (Laravel convierte el warning en excepción) y `{${expr}}` ejecutaba código al cargar el fichero. Hoy no hay ningún `$` en los valores reales y los ficheros actuales están bien escapados: regenerarlos con `php_str()` da bytes idénticos.
+- **Visibilidad en `/desa:wiki`** — el formato de petición fijaba `teams: []`, `roles: []` e `is_published: true` sin distinguir entre crear y actualizar, y decía que `[]` hacía la página pública. En el backend, `roles` es la lista de roles que pueden verla: con `roles: []` solo la ve super-admin. `teams: []` solo la abre a todos los equipos. Por tanto, una actualización borraba los equipos y roles de la página (dejaba de verla quien no fuera super-admin) y publicaba los borradores, y una página creada con el ejemplo tampoco la veían los empleados. Ahora:
+  - al actualizar, se lee con `?include=teams,roles` y se conservan `document_id`, `is_published`, `teams` y `roles`;
+  - al crear, `teams` y `roles` se copian del padre;
+  - si la página o el padre tienen `roles` vacíos (solo los ve super-admin) o han perdido sus equipos (borrados), no se copia esa visibilidad en silencio: se avisa y se pregunta;
+  - la verificación comprueba que `teams`, `roles` y `fields.is_public` no han cambiado al actualizar, y que `roles` no ha quedado vacío al crear;
+  - se avisa de que el GET no devuelve `searchable_tags` y hay que reescribirlo al actualizar;
+  - se retira `status` de la lista de includes, porque en los documentos devuelve 500.
+- **Paginación en `/desa:wiki`** — la skill decía que los GET devuelven 25 resultados por página, pero el backend devuelve 5. Con eso, un documento que existía en la página 2 de la búsqueda se tomaba por inexistente y se creaba un duplicado. Las búsquedas y los listados de hijos llevan ahora `perPage=100` y se mira `meta.has_more_pages`.
+
+### Security
+
+- **`allowed-tools` sin ejecución arbitraria en cinco skills** (magic-factorial conserva el suyo; ver Notes). `allowed-tools` preaprueba herramientas, no las restringe, durante el turno en que se invoca la skill, y el modelo puede invocar las skills del plugin por su cuenta.
+  - `/desa:review`: sale `git:*` sin sustituto. Claude Code ya aprueba por su cuenta `git diff/log/show/status` con flags seguros, y un prefijo como `Bash(git log:*)` admitiría `--output=<fichero>`, que escribe ficheros arbitrarios. `gh:*` pasa a `gh pr diff:*`, porque Claude Code no aprueba solo ningún comando `gh` y `gh pr diff` no tiene flags que escriban ficheros. El `git add` del Paso 7 pasa a pedir permiso; los runners de tests ya lo pedían.
+  - `/desa:plan`: salen `git:*` y `Write` (en plan mode el fichero del plan no lo necesita).
+  - `/desa:triage`: salen `php:*`, `curl:*`, `python3:*`, `grep:*` y `git:*`. Como en auto mode no hay aviso de permiso, antes de cada medición la skill escribe el comando y el entorno, y espera confirmación si no es local o si toca una base de datos.
+  - `/desa:translations`: salen `curl:*` y `python3:*`; como en `/desa:wiki`, cada llamada a la API pide permiso en modo manual.
+  - `/desa:update`: `claude:*`, que aprobaba también lanzar un Claude anidado sin permisos, `claude mcp add` o `claude plugin install`, pasa a los dos comandos exactos que usa.
+- **El modelo ya no puede invocar `/desa:update`** (`disable-model-invocation: true`): solo se ejecuta cuando el dev escribe `/desa:update`.
+
+### Changed
+
+- `Task` → `Agent` en el `allowed-tools` de `/desa:plan` y `/desa:triage`. Es el nombre actual de la herramienta de subagentes; `Task` seguía funcionando como alias.
+- README: nueva sección «Mantenimiento: `allowed-tools`» con la política anterior.
+
+### Notes
+
+- Es el bloque 1 de la auditoría `docs/auditorias/2026-09-28-skills-opus-5-5.md`. `/desa:magic-factorial` queda fuera de este bloque, sin cambios: conserva `Bash(curl:*)`, `Bash(python3:*)`, `Write` y `Edit` en `allowed-tools`, y el modelo puede invocarla.
+- En modo manual habrá más avisos de permiso en `/desa:review` (el `git add` del Paso 7), `/desa:triage` (mediciones) y `/desa:translations` (cada llamada a la API). Es intencionado. En auto mode, Claude Code ya descartaba `php:*` y `python3:*` de las skills, pero `curl:*`, `git:*`, `gh:*` y `claude:*` sí se aplicaban sin pasar por el clasificador; ahora esos comandos pasan por él.
+- Pendiente para el bloque 4: el test automático de `php_str()`, que irá con el script empaquetado de translations.
+
 ## [1.10.0] — 2026-09-16
 
 ### Added

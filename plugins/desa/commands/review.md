@@ -1,7 +1,7 @@
 ---
 description: Revisar código aplicando los estándares del equipo antes de commit o PR
 argument-hint: [ruta de archivo, número de PR (#42), vacío para cambios locales, --verbose]
-allowed-tools: Bash(git:*), Bash(gh:*), Read, Grep, Glob
+allowed-tools: Bash(gh pr diff:*), Read, Grep, Glob
 ---
 
 # Review — Revisión de código con estándares Grupo Desa

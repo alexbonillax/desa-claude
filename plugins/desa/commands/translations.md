@@ -1,7 +1,6 @@
 ---
 description: Gestionar traducciones (terms) vía API y sincronizar archivos locales
 argument-hint: [crear term, sincronizar, buscar texto]
-allowed-tools: Bash(curl:*), Bash(python3:*)
 ---
 
 # Translations — Gestión de traducciones de Grupo Desa
@@ -238,7 +237,7 @@ curl -s -g -X GET "https://api2.grupodesa.app/locales" \
 - Ruta: `resources/lang/{lang}/{namespace}.php`
 - PHP `return array(...)` plano con claves dot-notation (incluido notifications, siempre aplanado)
 - Ordenadas alfabéticamente, comillas dobles, `=>` alineados
-- Escapar `"` → `\"` y `\` → `\\` en valores
+- Escapar claves y valores en este orden: `\` → `\\`, luego `"` → `\"`, luego `$` → `\$` (ver abajo)
 - Trailing newline
 - Crear directorio `{lang}/` si no existe
 - Ejemplo:
@@ -253,6 +252,21 @@ return array(
 ```
 
 Alineación: encontrar la clave más larga del archivo, rellenar con espacios antes de `=>` para que todos queden alineados.
+
+Escapado: dentro de comillas dobles PHP interpola `$var` y evalúa `{${expr}}`. Un valor de la API sin escapar tumba el fichero de idioma entero (Laravel convierte el warning de variable indefinida en excepción) o ejecuta código al cargarlo, y los valores los escribe cualquiera con acceso a la API. El orden importa: si se escapa `"` antes que `\`, la barra de `\"` se duplica y el fichero deja de parsear. Usar siempre esta función al generar el PHP, en claves y valores:
+
+```python
+def php_str(s):
+    return '"' + s.replace('\\', '\\\\').replace('"', '\\"').replace('$', '\\$') + '"'
+```
+
+Pegarla en un heredoc con el delimitador entre comillas (`python3 - <<'PY'`) o en un fichero, nunca dentro de `python3 -c "…"`: bash se come `\\`, `\"` y `$`, y la función devuelve basura sin dar error.
+
+Para reescribir un fichero que ya existe, cargar sus valores actuales con PHP y no leyendo el texto fuente, donde ya están escapados y `php_str()` los escaparía dos veces:
+
+```bash
+php -r 'echo json_encode(require "resources/lang/es/app.php", JSON_UNESCAPED_UNICODE);'
+```
 
 ## Ortografía — OBLIGATORIO
 
@@ -324,7 +338,7 @@ Si un POST devuelve error 403, informa al usuario de que no tiene permisos. Si d
 9. **Actualizar archivos locales** si estamos en un proyecto:
    - Leer el archivo, añadir/actualizar la clave, reordenar alfabéticamente, escribir
    - Frontend: actualizar `translations.json` de cada idioma que tenga valor
-   - Backend: actualizar `{namespace}.php` de cada idioma que tenga valor
+   - Backend: actualizar `{namespace}.php` de cada idioma que tenga valor, cargando los valores actuales con PHP y escribiendo claves y valores con `php_str()` (sección «Backend (Laravel)»)
 
 Para actualizar: GET `/terms/{id}` para obtener valores actuales, mergear los nuevos valores sobre los existentes, luego POST con el resultado completo.
 
@@ -362,7 +376,7 @@ Requiere estar en un proyecto (frontend o backend). La API es la fuente de verda
    - Fetch todos los terms con paginación (ver sección Paginación)
    - Para cada idioma obtenido de `/locales`:
      - Recoger terms que tengan valor para este idioma
-     - Si hay terms: crear directorio `resources/lang/{lang}/` si no existe, generar PHP y escribir en `resources/lang/{lang}/{namespace}.php`
+     - Si hay terms: crear directorio `resources/lang/{lang}/` si no existe, generar PHP con `php_str()` (sección «Backend (Laravel)») y escribir en `resources/lang/{lang}/{namespace}.php`
      - Si no hay terms para este idioma+namespace: no crear el archivo
 
 5. Mostrar resumen: cuántos terms sincronizados, cuántos archivos escritos, qué idiomas
@@ -372,7 +386,7 @@ Requiere estar en un proyecto (frontend o backend). La API es la fuente de verda
 Usar un script python3 para fetch paginado eficiente. Ejemplo para un namespace:
 
 ```bash
-python3 -c "
+python3 - <<'PY'
 import json, subprocess
 
 def fetch_all(namespace, token):
@@ -393,10 +407,10 @@ def fetch_all(namespace, token):
 token = 'TOKEN_AQUI'
 terms = fetch_all('app', token)
 print(json.dumps(terms, ensure_ascii=False))
-"
+PY
 ```
 
-Adaptar el script según el flujo (frontend genera JSON, backend genera PHP). Procesar todos los idiomas en un solo script para evitar múltiples ejecuciones.
+Adaptar el script según el flujo (frontend genera JSON, backend genera PHP con `php_str()` pegada dentro del mismo heredoc). Procesar todos los idiomas en un solo script para evitar múltiples ejecuciones.
 
 ## Flujo: Búsqueda
 

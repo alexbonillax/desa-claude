@@ -1,7 +1,7 @@
 ---
 description: Acotar una tarea antes de invertir esfuerzo en ella, dimensionando el premio y declarando el presupuesto antes de gastarlo
 argument-hint: [descripción de la tarea, pregunta de decisión o síntoma]
-allowed-tools: Bash(git:*), Bash(php:*), Bash(curl:*), Bash(grep:*), Bash(python3:*), Read, Grep, Glob, Task
+allowed-tools: Read, Grep, Glob, Agent
 ---
 
 # Triage — Acotar una tarea antes de trabajar en ella
@@ -67,6 +67,8 @@ Presupuesto: {N} agentes · ~{M} min · {K} mediciones. Nivel {1|2|3}.
 **[T-7] Nivel 3 se pide, no se toma.** Si el presupuesto pasa de ~10 min o de 3 agentes, decirlo y esperar. El usuario es quien decide si el premio lo justifica; sin ese punto de veto, el descubrimiento de que sobraba llega cuando ya se pagó.
 
 **[T-8] No editar ficheros que un barrido está leyendo.** Si hay agentes recorriendo el árbol, un edit invalida su resultado en silencio. Medir sin editar (construir las dos variantes en el mismo proceso) o esperar.
+
+Las mediciones (`php`, `curl`, `python3`, consultas a BD) no están preaprobadas, pero no hay que contar con el aviso de permiso: en auto mode no aparece. Antes de cada medición, escribir en una línea el comando y el entorno contra el que va (local, staging o producción). Si no es local o toca una base de datos, esperar a que el usuario lo confirme: el `CLAUDE.md` del proyecto dice a qué apunta cada entorno, y en alguno la BD «local» es la de producción.
 
 ## Paso 5: Medir, nunca restar
 
