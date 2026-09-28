@@ -1,46 +1,42 @@
 ---
 description: Revisar código aplicando los estándares del equipo antes de commit o PR
 argument-hint: [ruta de archivo, número de PR (#42), vacío para cambios locales, --verbose]
-allowed-tools: Bash(gh pr diff:*), Read, Grep, Glob
+allowed-tools: Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/diff-context.sh:*), Bash(gh pr diff:*), Read, Grep, Glob
 ---
 
 # Review — Revisión de código con estándares Grupo Desa
 
-Revisa cambios de código aplicando las convenciones del equipo. Detecta automáticamente el tipo de proyecto: backend (Laravel/PHP con artisan), frontend (React/JS monorepo con `apps/web` o `packages/core`), websites (Next.js single-app con `next.config.*`) o mobile (React Native bajo `apps/mobile/`).
+Revisa cambios de código aplicando las convenciones del equipo. Detecta automáticamente el tipo de proyecto: backend (Laravel/PHP con artisan), frontend (React/JS monorepo con `apps/web` o `packages/core`), websites (Next.js single-app con `next.config.*`) o mobile (React Native bajo `apps/mobile/`). Un mismo diff puede tener varios tipos, p. ej. frontend + mobile.
 
-## Paso 1: Detectar tipo de proyecto
+## Paso 1: Fuente y tipo de proyecto
 
-Desde el directorio de trabajo actual:
+Separar de `$ARGUMENTS` los flags (`--verbose`, `-v`) y, con lo que quede, ejecutar:
 
-```bash
-DIFF_FILES=$(git diff --staged --name-only 2>/dev/null || git diff --name-only 2>/dev/null || git diff HEAD~1 --name-only 2>/dev/null)
-if [ -f artisan ] && [ -f composer.json ]; then echo "backend";
-elif [ -d apps/mobile ] && echo "$DIFF_FILES" | grep -q "apps/mobile/"; then echo "mobile";
-elif [ -d apps/web ] || [ -d packages/core ]; then echo "frontend";
-elif [ -f next.config.js ] || [ -f next.config.mjs ] || [ -f next.config.ts ]; then echo "websites";
-else echo "unknown"; fi
-```
+- `#N` o solo dígitos (PR): `bash ${CLAUDE_PLUGIN_ROOT}/scripts/diff-context.sh --pr N`
+- una ruta: `bash ${CLAUDE_PLUGIN_ROOT}/scripts/diff-context.sh --path 'RUTA'`, con la ruta entre comillas simples. Con varias rutas, una ejecución por ruta.
+- nada: `bash ${CLAUDE_PLUGIN_ROOT}/scripts/diff-context.sh`
 
-Si es `unknown`, informar al usuario y terminar.
+El script elige la fuente en este orden: staged; si no hay, unstaged más los ficheros sin trackear; con el árbol limpio fuera de una rama de integración (main, master, develop, dev), la rama frente a su base, que es la de merge-base más cercana; si no, el último commit. Imprime:
 
-Si el diff toca tanto `apps/web/` como `apps/mobile/`, aplicar criterios de ambos (frontend + mobile).
+- `REPO`, `RAIZ` (la raíz del repo) y, con `--path`, `ALCANCE`;
+- `FUENTE` y `DIFF`, la orden que da el diff de esa fuente, lista para ejecutar tal cual desde cualquier directorio del repo;
+- `TIPOS`, `FICHEROS` y `SIN_TRACKEAR`;
+- `EXCLUIDOS`: ficheros sin trackear de `.claude/`, `.idea/`, `.expo/`, `.vscode/` o `.cursor/`, que no se revisan;
+- en modo PR, `PR_EN_WORKTREE`;
+- un `AVISO` si queda algo fuera de la revisión;
+- tras `FICHEROS:`, la lista de ficheros con rutas relativas a `RAIZ` (`?? ` delante de los sin trackear).
+
+Si sale `ERROR` (ruta que no existe o fuera del repo, fallo de git o de gh, clon superficial) o `REPO=unknown`, informar al usuario con el mensaje y terminar. Si `FICHEROS=0`, informar de que no hay cambios y terminar.
+
+Aplicar los criterios compartidos más los de cada tipo de `TIPOS`: backend, frontend, mobile (más #65, que está en la sección de frontend) o websites. En el monorepo, los ficheros de `apps/mobile/` son mobile y el resto (`apps/web/`, `packages/`) frontend.
 
 ## Paso 2: Obtener los cambios a revisar
 
-Según `$ARGUMENTS`:
-
-- **Si empieza por `#` o es solo dígitos** (ej. `42`, `#42`): Es un PR. Obtener cambios con `gh pr diff {N}`.
-- **Si es una ruta de archivo existente**: Limitar el diff a ese archivo usando `git diff --staged -- {ruta}`, con fallback a `git diff -- {ruta}` y luego `git diff HEAD~1 -- {ruta}`.
-- **Si está vacío**: Buscar cambios en este orden:
-  1. `git diff --staged` — cambios preparados para commit
-  2. `git diff` — cambios no staged
-  3. `git diff HEAD~1` — último commit
-
-Si no hay cambios en ninguna fuente, informar al usuario y terminar.
+Obtener el diff ejecutando `DIFF` tal cual. Los ficheros sin trackear no salen en el diff: leer enteros los que sean código. Los que no lo sean (notas `.md`, `package-lock.json`, ficheros generados) no se revisan y se listan en «sin revisar» de la cabecera del Paso 8.
 
 Si hay más de 20 ficheros modificados, avisar al usuario y sugerir revisar por fichero o directorio.
 
-Indicar al usuario qué fuente se está revisando (staged, unstaged, último commit o PR #N).
+Indicar al usuario qué fuente se está revisando y, si hay `AVISO`, repetirlo.
 
 ## Paso 3: Leer CLAUDE.md
 
@@ -58,11 +54,11 @@ Solo cuando una incidencia potencial requiera verificación contra el código ex
 
 Analizar cada fichero modificado. Para cada posible incidencia, asignar internamente un nivel de confianza (0-100). **Solo reportar incidencias con confianza >= 75.**
 
-**Severidad**: Crítico para seguridad, corrupción de datos o bugs silenciosos (criterios #6, #13, #22, #25, #27, #30, #33, #49, #69, #74). Importante para violaciones de patrón estructural que afectan a corrección o mantenibilidad. Menor para estilo, naming y convenciones.
+**Severidad**: Crítico para seguridad, corrupción de datos o bugs silenciosos (criterios #6, #13, #22, #25, #27, #30, #33, #49, #69, #74, #97). Importante para violaciones de patrón estructural que afectan a corrección o mantenibilidad. Menor para estilo, naming y convenciones. Un criterio de websites que repite uno del monorepo tiene su misma severidad.
 
-Si `$ARGUMENTS` contiene `--verbose` o `-v`, añadir al final del reporte una sección con las incidencias descartadas por confianza < 75 (ver formato en Paso 6).
+Si `$ARGUMENTS` contiene `--verbose` o `-v`, añadir al final del reporte una sección con las incidencias descartadas por confianza < 75 (ver formato en Paso 8).
 
-### Criterios compartidos (ambos proyectos)
+### Criterios compartidos (todos los tipos)
 
 1. **Adherencia a patrones preexistentes** — El código nuevo DEBE seguir los patrones del proyecto. Si hay duda, leer un fichero de referencia del mismo dominio para comparar
 2. **Escalabilidad y mantenibilidad** — Acoplamiento excesivo, lógica duplicada, abstracciones prematuras o ausentes
@@ -191,6 +187,8 @@ Tras la revisión estática (Pasos 1-5), si el proyecto tiene infraestructura de
 
 > **⚠️ Paso 6 es incondicional respecto a Paso 5.** Aunque Paso 5 haya reportado incidencias importantes o críticas sobre los cambios (código muerto, over-engineering, etc.), Paso 6 SE EJECUTA igual si hay tests configurados. La razón es que Paso 5, Paso 6 y Paso 7 son **fuentes de información complementarias**: estilo/diseño + ejecución de tests + cobertura. El dev consolida las tres en el reporte final y decide. No omitir Paso 6 porque los cambios "parezcan mejorables" — siempre es informativo conocer si rompen tests o bajan cobertura.
 
+**En modo PR**, ejecutar este paso y el 7 solo si `PR_EN_WORKTREE=si`, es decir, si el working tree es exactamente el commit de la PR y está limpio. Si no, los tests correrían sobre otro código: anotar `Tests: omitidos (la PR #N no está en el working tree)` y no hacer checkout por cuenta propia.
+
 ### Detección del runner de tests
 
 Comprobar la presencia de ficheros de configuración:
@@ -204,7 +202,7 @@ HAS_VITEST=$([ -f vitest.config.js ] || [ -f vitest.config.mjs ] || [ -f vitest.
 HAS_PLAYWRIGHT=$([ -f playwright.config.js ] || [ -f playwright.config.ts ] && echo "yes" || echo "no")
 ```
 
-Si ninguno está configurado, **omitir la Fase 6 silenciosamente** y continuar a Paso 7. No es error.
+Si ninguno está configurado, anotar `Tests: sin runner configurado` para el Paso 8 y continuar al Paso 7. No es error.
 
 ### Ejecución por project type
 
@@ -235,38 +233,20 @@ Si ninguno está configurado, **omitir la Fase 6 silenciosamente** y continuar a
     ```bash
     npx playwright test [specs-relacionadas]
     ```
-    Si `tests/e2e/smoke/` está vacío (E2E diferidos), omitir Playwright silenciosamente.
+    Si `tests/e2e/smoke/` está vacío (E2E diferidos), omitir Playwright y anotarlo en la línea de Tests (`E2E: sin specs`).
 
-#### project_type = frontend (monorepo)
+#### project_type = frontend (monorepo) y mobile
 
-⚠️ **TODO**: pendiente de definir el runner de tests del monorepo cuando el equipo lo configure. Mientras tanto:
-
-```
-echo "🟡 Ejecución de tests para frontend monorepo aún no implementada en esta skill."
-echo "Pendiente del Bloque de testing del monorepo. Omitiendo Fase 6."
-```
-
-Continuar a Paso 7.
-
-#### project_type = mobile
-
-⚠️ **TODO**: pendiente de definir el runner de tests de mobile (probable Jest). Mientras tanto:
-
-```
-echo "🟡 Ejecución de tests para mobile aún no implementada en esta skill."
-echo "Pendiente del Bloque de testing de mobile. Omitiendo Fase 6."
-```
-
-Continuar a Paso 7.
+El equipo aún no ha definido el runner de tests del monorepo ni el de mobile (probable Jest). Anotar `Tests: sin runner para este stack` y continuar al Paso 7.
 
 ### Interpretación del resultado
 
-- **Todos los tests pasan, exit 0** → Anotar para el reporte final (Paso 8): `Tests: N pasados / N (incluido en sección "Tests")`. Continuar a Paso 7.
+- **Todos los tests pasan, exit 0** → Anotar para la línea `Tests` del Paso 8: `N pasados · M saltados · K fallidos`, con el comando usado. Si el runner no ha ejecutado ningún test («No tests executed!», 0 tests), no es verde: anotar `Tests: 0 ejecutados` y el motivo. Continuar al Paso 7.
 - **Algún test falla** → Anotar fichero:test:error. Generar una propuesta de corrección (qué línea cambiar y cómo). **Preguntar al dev** antes de aplicar:
     > He detectado N tests fallando tras tus cambios. ¿Quieres que aplique las correcciones propuestas? (s/n)
 
     Si el dev responde "s", aplicar y re-ejecutar (bucle máximo 3 iteraciones para correcciones de tests pre-existentes). Si tras 3 iter sigue fallando, reportar al dev sin aplicar más cambios y NO continuar a Paso 7.
-- **Tests no ejecutables** (error de configuración, no error de test) → Anotar como anomalía y omitir Paso 7. NO intentar arreglar la configuración.
+- **Tests no ejecutables** (error de configuración, no error de test) → Anotar `Tests: no ejecutables ({motivo})` y omitir Paso 7. NO intentar arreglar la configuración.
 
 ### Reglas estrictas para esta fase
 
@@ -282,7 +262,7 @@ Solo se ejecuta esta fase si:
 1. Paso 6 pasó verde (todos los tests existentes en verde)
 2. El reporte de cobertura muestra **líneas nuevas/modificadas del diff sin cubrir** en alguno de los ficheros del diff (independiente de cualquier umbral global del proyecto; en `desa-websites` el gate es de patch coverage por diff, no global)
 
-Si la cobertura ya cumple, **omitir Paso 7 silenciosamente** y continuar a Paso 8.
+Si no hay líneas del diff sin cubrir, anotar `Cobertura del diff: sin líneas sin cubrir` y continuar al Paso 8. Si el Paso 6 no dio cobertura (sin runner, sin driver o tests omitidos), anotar `Cobertura del diff: no disponible`.
 
 > **⚠️ Paso 7 también es incondicional respecto a Paso 5.** Si Paso 6 pasó verde y hay gap de cobertura, Paso 7 SE EJECUTA aunque Paso 5 haya tachado los cambios como código muerto / over-engineering. La razón es la misma que con Paso 6: el dev necesita la información completa para decidir. Generar tests sobre código que quizá se va a borrar no es desperdicio — el dev verá el reporte completo y decidirá si borra el código o conserva los tests. Caso especial: si el dev finalmente decide borrar el código fuente, también borrará los tests generados — eso es trabajo trivial comparado con la pérdida de información si Paso 7 se hubiera saltado.
 
@@ -313,7 +293,7 @@ Para cada gap detectado:
 
 - `git add` de los tests nuevos y modificados
 - **NUNCA** `git commit` ni `git push`
-- Anotar para el reporte final (Paso 8): tests generados, gaps cubiertos, gaps no convergidos
+- Anotar para la línea `Cobertura del diff` del Paso 8: líneas sin cubrir, tests generados y gaps que no han convergido
 
 ### Reglas estrictas para esta fase
 
@@ -329,9 +309,12 @@ Para cada gap detectado:
 ```
 ## Revisión de código
 
-**Proyecto**: {backend|frontend|mobile}
-**Fuente**: {staged|unstaged|último commit|PR #N}
-**Ficheros revisados**: {N}
+**Proyecto**: {TIPOS: backend | frontend | mobile | websites | frontend + mobile}
+**Fuente**: {staged | unstaged | rama frente a {base} | último commit | PR #N}{, limitado a {ruta}}
+**Ficheros revisados**: {N} de {FICHEROS}{ (K sin trackear, leídos enteros)}{ · sin revisar: …}
+**Tests**: {valor de la tabla de abajo}
+**Cobertura del diff**: {valor de la tabla de abajo}
+{**Aviso**: {AVISO del Paso 1}, solo si lo hubo}
 
 ---
 
@@ -363,14 +346,31 @@ Si modo verbose (`--verbose` o `-v`), añadir al final:
 - **fichero:línea** — Descripción (confianza: N) [#N]
 ```
 
-Omitir secciones de severidad vacías. Si no hay incidencias:
+Valores de las líneas `Tests` y `Cobertura del diff`:
+
+| Línea | Valor | Cuándo |
+|---|---|---|
+| Tests | `N pasados · M saltados · K fallidos` | se ejecutaron tests; añadir ` · C tests existentes corregidos` si el bucle del Paso 6 los modificó |
+| Tests | `0 ejecutados ({motivo})` | el runner no ejecutó ninguno: no es verde |
+| Tests | `sin runner configurado` · `sin runner para este stack` | no hay runner (Paso 6) |
+| Tests | `no ejecutables ({motivo})` | error de configuración, no de test |
+| Tests | `omitidos (la PR #N no está en el working tree)` | modo PR con `PR_EN_WORKTREE=no` |
+| Cobertura del diff | `sin líneas sin cubrir` | el Paso 7 no encontró huecos |
+| Cobertura del diff | `K líneas sin cubrir → T tests generados, G sin converger` | el Paso 7 se ejecutó |
+| Cobertura del diff | `no evaluada ({tests en rojo · no ejecutables · 0 ejecutados})` | el Paso 7 no se ejecutó por el resultado del Paso 6 |
+| Cobertura del diff | `no disponible ({motivo})` | sin runner, sin driver de cobertura o tests omitidos |
+
+Omitir secciones de severidad vacías. Las líneas de cabecera no se omiten: si algo no se ha hecho, la línea dice por qué, para que «tests en verde» y «no se ejecutó nada» no se confundan. Si no hay incidencias:
 
 ```
 ## Revisión de código
 
-**Proyecto**: {backend|frontend|mobile}
-**Fuente**: {staged|unstaged|último commit|PR #N}
-**Ficheros revisados**: {N}
+**Proyecto**: {TIPOS}
+**Fuente**: {…}
+**Ficheros revisados**: {N} de {FICHEROS}{ (K sin trackear, leídos enteros)}{ · sin revisar: …}
+**Tests**: {…}
+**Cobertura del diff**: {…}
+{**Aviso**: {AVISO del Paso 1}, solo si lo hubo}
 
 Sin incidencias. Los cambios cumplen con los estándares del equipo.
 ```

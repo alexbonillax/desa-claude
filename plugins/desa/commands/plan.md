@@ -1,7 +1,7 @@
 ---
 description: Planificar una tarea con exploración, review-awareness y 3 iteraciones de mejora antes de implementar
 argument-hint: [descripción de la tarea]
-allowed-tools: Read, Grep, Glob, Agent
+allowed-tools: Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/diff-context.sh:*), Read, Grep, Glob, Agent
 ---
 
 # Plan — Planificación con estándares Grupo Desa
@@ -13,14 +13,15 @@ Si `$ARGUMENTS` está vacío, pedir al usuario la descripción de la tarea y ter
 ## Paso 1: Detectar tipo de proyecto
 
 ```bash
-DIFF_FILES=$(git diff --staged --name-only 2>/dev/null || git diff --name-only 2>/dev/null || git diff HEAD~1 --name-only 2>/dev/null)
-if [ -f artisan ] && [ -f composer.json ]; then echo "backend";
-elif [ -d apps/mobile ] && echo "$DIFF_FILES" | grep -q "apps/mobile/"; then echo "mobile";
-elif [ -d apps/web ] || [ -d packages/core ]; then echo "frontend";
-else echo "unknown"; fi
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/diff-context.sh --repo
 ```
 
-Si es `unknown`, informar al usuario y terminar.
+- `REPO=backend` → backend.
+- `REPO=websites` → websites.
+- `REPO=monorepo` → frontend, mobile o los dos según la tarea (`APPS` dice qué apps existen). `apps/mobile/` es mobile y el resto (`apps/web/`, `packages/`) frontend, igual que en `/desa:review`: una tarea de mobile que añade un hook en `packages/core` lleva las dos secciones. Si `$ARGUMENTS` no lo deja claro, cargar las dos en el Paso 2 y quedarse con las que correspondan al redactar el borrador, cuando la exploración lo aclare.
+- `REPO=unknown` o `ERROR` → informar al usuario y terminar.
+
+El tipo sale del repositorio y de la tarea, no del diff: al planificar, los cambios de la tarea aún no existen y lo que haya en el árbol es otro trabajo.
 
 ## Paso 2: Cargar contexto fijo
 
@@ -28,10 +29,11 @@ Leer en paralelo:
 
 - `CLAUDE.md` del proyecto (si existe).
 - `~/.claude/projects/{project-path}/memory/MEMORY.md` (si existe) — aplicar cualquier feedback o convención relevante.
-- `commands/review.md` del plugin desa — cargar los **criterios compartidos (#1–#9)** siempre, más la sección del tipo detectado:
-  - backend → criterios #10–#33
-  - frontend → criterios #34–#81
-  - mobile → criterios #82–#85 (más frontend si el diff toca `apps/web/`)
+- `${CLAUDE_PLUGIN_ROOT}/commands/review.md` — la sección «Criterios compartidos» siempre, más la del tipo detectado, por su encabezado:
+  - backend → «Criterios backend (Laravel/PHP)»
+  - frontend → «Criterios frontend (React/JS)»
+  - mobile → «Criterios mobile (React Native)», más #65, que está en la sección de frontend
+  - websites → «Criterios websites (Next.js single-app)»
 
 ## Paso 3: Explorar (paralelo, adaptativo)
 
@@ -41,7 +43,7 @@ Decidir número de Explore agents según `$ARGUMENTS`:
 - **Tarea media** (un endpoint, un componente) → **1 Explore agent**.
 - **Tarea amplia o de scope incierto** → **hasta 3 Explore agents en paralelo** (un solo mensaje, múltiples tool calls), cada uno con foco distinto:
   1. **Patrones existentes en el dominio**: archivos del mismo dominio o similar que sirvan de referencia.
-  2. **Helpers/hooks/servicios reutilizables**: grep en `packages/core/src/hooks`, `app/Services`, `app/Models`, `app/Http/Resources` para encontrar código que evite reimplementar.
+  2. **Helpers/hooks/servicios reutilizables**: grep en `packages/core/src/hooks`, `app/Services`, `app/Models`, `app/Http/Resources` (en websites, `src/hooks`, `src/lib`, `src/api/services`) para encontrar código que evite reimplementar.
   3. **Referencias de test / casos límite**: tests existentes de código similar para entender qué edge cases validar.
 
 Cada agent debe devolver **rutas exactas con números de línea**, no descripciones vagas.
@@ -81,6 +83,8 @@ Para cada archivo planificado, comprobar explícitamente las reglas relevantes c
 **Frontend**: `useCustomNavigate` no `useNavigate` (#58), `memo()` + `useCallback` en `*TableBody` y filas (#54, #59), `useTable`/`useFilter` para listados (#60), `i18next.t()` nunca a nivel módulo (#69), no `fal` (solo `fasr`/`fass`) (#49), `ActionTypography` para códigos copiables (#50), API `include` siempre plano (#74), `TextNumericFormat` para números (#75), `import * as XService` (#55), `useDisplayColumn` para columnas opcionales (#61), `hasRole(..., false)` para portal exclusivo (#64).
 
 **Mobile**: `useTheme()` no `StyleSheet.create` (#65), reuso de `packages/core` antes de reimplementar (#82), screens sin lógica de componentes (#83), naming de theme = componente RN (#84, #85).
+
+**Websites**: `LocaleLink` en Client Components y `localePath()` en Server Components (#98), imports directos de MUI (#99), Server Components por defecto (#100), desestructurar `.data` y comprobar `null` (#101), `fetch` solo vía `api.js` (#102), ISR con las constantes `REVALIDATE` (#103), lógica testable fuera de los Server Components async (#104), `i18next.t()` nunca a nivel módulo (#97).
 
 Si el borrador viola alguna regla, corregirlo antes de la siguiente pasada.
 

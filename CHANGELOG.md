@@ -5,6 +5,36 @@ All notable changes to the `desa` plugin will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.12.0] — 2026-09-28
+
+### Fixed
+
+- **Detección de la fuente y del tipo en `/desa:review` y `/desa:plan`** — la cadena `git diff --staged --name-only || git diff --name-only || git diff HEAD~1 --name-only` nunca pasaba de la primera orden, porque `git diff --staged` sale con 0 aunque no haya nada. Con cambios sin stagear, un diff de `apps/mobile/` se revisaba con los criterios de frontend y sin los de mobile. La detección vive ahora en un script compartido, `plugins/desa/scripts/diff-context.sh`, con 109 pruebas en `tests/diff-context.test.sh`. El script:
+  - devuelve una orden `DIFF` lista para ejecutar desde cualquier directorio del repo, con la ruta anclada a la raíz (`:(top)`) y entrecomillada, así que funciona con rutas como `(auth)`, `[id]` o `[locale]` de Expo Router y Next.js, con espacios y con comillas;
+  - lee el estado con un único `git status --porcelain -z` sin locks opcionales, así que no reescribe el índice;
+  - si git o gh fallan, la ruta no existe o el clon es superficial, sale con `ERROR`, en vez de decir que no hay cambios.
+- **`/desa:plan` en proyectos `websites`** — el Paso 1 no conocía ese tipo y en desa-websites terminaba en `unknown`, lo que cortaba la cadena triage → plan. Ahora detecta el tipo por el repositorio y no por el diff, que al planificar es de otro trabajo. Además:
+  - carga los criterios por el encabezado de sección, no por rangos `#N` copiados a mano;
+  - busca helpers también en `src/hooks`, `src/lib` y `src/api/services`;
+  - tiene ejemplos de websites en la Iteración 2;
+  - lee review.md con `${CLAUDE_PLUGIN_ROOT}`, que apunta a la versión instalada.
+- **Formato de salida de `/desa:review`** — la cabecera no contemplaba websites, frontend + mobile ni la fuente «fichero», y no tenía sitio para tests ni cobertura. Los valores posibles de Tests y Cobertura del diff van ahora en una tabla del Paso 8. Cuando no había runner se omitía «silenciosamente», así que «tests en verde» y «no se ejecutó nada» se confundían. Ahora la cabecera lleva siempre Proyecto, Fuente, «N de M» ficheros, Tests y Cobertura del diff, con el motivo cuando algo no se hizo. Un runner que no ejecuta ningún test no cuenta como verde.
+- **Tests en modo PR** — con `/desa:review 42`, los Pasos 6 y 7 corrían sobre el working tree local, que normalmente es otra rama. Ahora solo se ejecutan si `HEAD` es el commit de la PR y el árbol está limpio.
+- **Flags en `$ARGUMENTS`** — `/desa:review --verbose` o `42 -v` no encajaban en ninguna rama del Paso 2. Ahora los flags se separan antes de clasificar.
+- `#97` (`i18next.t()` a nivel de módulo en websites, gemelo de `#69`) entra en la lista de Críticos, y un criterio de websites que repite uno del monorepo tiene su misma severidad.
+
+### Changed
+
+- **Fuentes de `/desa:review` sin argumentos**: staged; si no hay, unstaged **más los ficheros sin trackear**, que se leen enteros si son código; con el árbol limpio fuera de una rama de integración, **la rama frente a su base**; si no, el último commit. La base es la de merge-base más cercana entre `origin/HEAD`, main, master, develop y dev, así que una rama sacada de `develop` se compara con `develop` y no con `main`, y un `origin/HEAD` que apunta a una rama borrada no la tumba. Con HEAD separado por delante de la base también se revisa la rama. Los ficheros sin trackear de `.claude/`, `.idea/`, `.expo/`, `.vscode/` y `.cursor/` no cuentan. Antes, un fichero nuevo sin `git add` no se revisaba y, con el árbol limpio en una rama de varios commits, solo se revisaba el último. Si se revisa lo staged y queda algo fuera, la skill lo avisa.
+- En el monorepo, los ficheros de `apps/mobile/` son mobile y el resto (`apps/web/`, `packages/`) frontend. Un diff puede tener los dos tipos. `/desa:plan` aplica la misma regla a la tarea.
+- Los stubs con `echo` de los tests de frontend y mobile pasan a la línea `Tests: sin runner para este stack`.
+- `/desa:triage` da la invocación de `/desa:plan` lista para pegar, con el premio y lo descartado.
+- `allowed-tools` de review y plan preaprueba el script (`Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/diff-context.sh:*)`), que es de solo lectura. En el README, la política de `allowed-tools` recoge esa excepción y la sección de `/desa:review` describe las fuentes nuevas.
+
+### Notes
+
+- Es el bloque 2 de la auditoría `docs/auditorias/2026-09-28-skills-opus-5-5.md`. El script trabaja desde la raíz de git, así que funciona desde cualquier subdirectorio del repo, y es compatible con el bash 3.2 de macOS.
+
 ## [1.11.0] — 2026-09-28
 
 ### Fixed

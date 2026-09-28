@@ -132,7 +132,7 @@ Declararla antes de empezar: **qué resultado concreto hace abandonar**. Y cumpl
 
 Encaminar explícitamente:
 
-- **`/desa:plan`** — merece la pena y hay que planificarlo
+- **`/desa:plan`** — merece la pena y hay que planificarlo. Dar la invocación lista para pegar, con lo ya cerrado, para que el plan no vuelva a explorarlo: `/desa:plan {petición acotada}. Premio: {…}. Descartado: {…}; no volver a explorarlo.`
 - **arreglo directo** — una o dos líneas con el premio ya medido; proponer el diff, no planificar
 - **no vale la pena** — con el número que lo demuestra
 - **bloqueado** — falta un instrumento o una decisión de negocio; decir exactamente cuál
