@@ -1,6 +1,7 @@
 ---
 description: Consultar o documentar en la wiki interna de Grupo Desa
 argument-hint: [qué consultar, documentar o actualizar]
+allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py token-status), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py workdir), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py GET:*)
 ---
 
 # Wiki — Sistema de documentación interna
@@ -16,7 +17,7 @@ Analiza lo que pide el usuario con $ARGUMENTS:
 
 Gestión de errores de la API:
 
-- **401**: Token caducado o inválido → pide al usuario un nuevo token y actualiza `settings.json` antes de reintentar
+- **401**: Token caducado o inválido → pedir uno nuevo con el procedimiento de `NO_TOKEN` de «Configuración» y reintentar
 - **403**: Autenticado pero sin permisos de escritura → informa al usuario y ofrece mostrar el contenido que habría enviado para que lo copie manualmente
 - **404**: Documento no encontrado → verifica el ID y navega desde root para encontrar el correcto
 - **422**: Error de validación → lee el campo `errors` de la respuesta JSON para identificar el campo problemático
@@ -24,28 +25,31 @@ Gestión de errores de la API:
 
 ## Configuración
 
-**Antes de cualquier llamada a la API**, extrae el token de `~/.claude/settings.json`:
+Todas las llamadas pasan por el cliente del plugin, que lee el token por su cuenta y solo lo envía a `api2.grupodesa.app`:
 
 ```bash
-python3 -c "import json, os; f=os.path.expanduser('~/.claude/settings.json'); print(json.load(open(f)).get('desa_wiki_token','') if os.path.exists(f) else '')"
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py token-status
 ```
 
-Guarda el valor resultante y úsalo directamente en todas las llamadas curl como `Bearer TOKEN`.
+- `OK …` → seguir. El token lo lee el script: no imprimirlo, no ponerlo en ningún comando y no pedirlo si ya hay uno. El que ya estuviera en la clave `desa_wiki_token` de `~/.claude/settings.json` sigue valiendo.
+- `NO_TOKEN`, `TOKEN_INVALIDO` o un 401 → pedir al usuario que copie su token de la wiki al portapapeles y lo guarde con esta orden en la propia sesión. El `!` delante hace que el token no pase por la conversación:
 
-Si el resultado está vacío (no hay token guardado):
+  ```
+  ! pbpaste | python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py set-token --stdin
+  ```
 
-1. Pide al usuario que te pase su token de la wiki (simplemente "Pásame tu token de la wiki para continuar")
-2. Una vez lo proporcione, guárdalo en `~/.claude/settings.json` usando la herramienta Read para leer el fichero y luego Edit para añadir la clave `"desa_wiki_token": "TOKEN_DEL_USUARIO"` al objeto JSON raíz
-3. Usa ese token directamente en las llamadas curl de esta sesión
+  Queda en `~/.config/desa/api-token` con permisos 600. Fuera de macOS, que ejecute en su terminal `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py set-token`, que lo pide por teclado. Si aun así pega el token en el chat, guardarlo con Write en `~/.config/desa/api-token`, ejecutar `chmod 600 ~/.config/desa/api-token` y avisarle de que queda en el historial de la sesión.
 
-**No continúes sin token válido.**
+  Si `token-status` dice `OK DESA_API_TOKEN`, el token sale de esa variable de entorno, que tiene prioridad: ante un 401, pedir al usuario que la actualice o la quite, porque `set-token` no la cambia.
+
+**No continúes sin token válido.** El mismo token sirve para `/desa:translations`.
 
 ## API
 
-- **Base URL**: `https://api2.grupodesa.app` (sin prefijo `/api/`)
-- **Auth**: `Authorization: Bearer TOKEN` (el token extraído de settings.json)
-- **curl**: Usar siempre `-g` para evitar problemas con corchetes en URLs
-- **Importante**: No usar variables de entorno en curl. No persisten entre llamadas. Siempre pegar el token directamente en el comando curl
+- **Base URL**: `https://api2.grupodesa.app` (sin prefijo `/api/`). La pone el cliente.
+- **Lecturas**: las rutas de esta skill se escriben como en la API (`/documents?filter[document]={id}&include=documents`), pero al llamar al cliente la ruta va sin `?` y cada parámetro en su `--param`: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py GET /documents --param 'filter[document]=34' --param include=documents --param perPage=100`. Con `?` o `&` en la ruta, el shell la parte o la rompe, y el texto libre (espacios, tildes, `#`) solo se codifica bien en `--param`. El cliente solo admite `/documents…`, `/terms…` y `/locales`.
+- **Escrituras**: el body (sin el contenido, al actualizar; ver «Antes de cualquier POST») se escribe con Write en un fichero JSON del directorio privado que da `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py workdir`, y se envía con `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py POST /documents/{id} --body {fichero}`. Nunca con el JSON dentro del comando: el shell interpreta `$`, backticks y comillas, y corrompe sin avisar el contenido técnico. El DELETE es `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py DELETE /documents/{id}`.
+- **Respuesta**: el cliente imprime `{"status": N, "body": …}`. Sale con 0 si la respuesta es 2xx, 1 si la API devuelve un error (ver la tabla de arriba), 2 sin token o con un token inválido, 3 si hay error de red y 64 si la orden está mal (p. ej. una ruta no permitida). No sigue redirecciones: un 3xx sale como error.
 
 ### Endpoints de lectura
 
@@ -188,6 +192,18 @@ Palabras que frecuentemente se escriben sin tilde por error:
 4. **Leer**: `GET /documents/{id}` — obligatorio antes de cualquier escritura. Al actualizar: `GET /documents/{id}?include=teams,roles`, para preservar el contenido y la visibilidad existentes. Al crear: leer el padre con `?include=teams,roles` para entender el contexto y heredar su visibilidad. En los dos casos, si `roles` viene vacío (la página solo la ve super-admin, probablemente porque se creó con una versión anterior de esta skill), o si `fields.is_public` es `false` y `teams` viene vacío (sus equipos se han borrado), no copiar esa visibilidad en silencio: avisar al usuario y preguntar qué equipos y roles poner. Quien escribe siempre es super-admin, así que no lo notaría
 5. **Revisar ortografía**: Antes de enviar, repasa title, description y content buscando palabras sin tilde. Consulta la tabla de la sección "Ortografía" y corrige. Este paso es obligatorio
 
+**Antes de cualquier POST** (crear o actualizar), enseñar al usuario una vista previa y esperar un sí explícito, igual que con el DELETE. Un POST publica al momento para quien tenga acceso y, al actualizar, sustituye la página entera. La vista previa incluye:
+
+- acción (crear o actualizar), padre (id y título), título, `description`, `searchable_tags`, `is_published` y visibilidad, con los nombres de equipos y roles;
+- al crear, el contenido completo. Al actualizar, el diff real frente a la API, no frente a una copia hecha a mano:
+  1. guardar el contenido actual dos veces, con `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py GET /documents/{id} --param include=teams,roles --save-content actual.md` y lo mismo con `--save-content nuevo.md` (quedan en el directorio de `workdir`);
+  2. aplicar los cambios a `nuevo.md` con Edit;
+  3. enseñar `diff -u {workdir}/actual.md {workdir}/nuevo.md`;
+  4. enviar después el POST con `--content-from nuevo.md`, para que los párrafos que no se tocan viajen tal cual;
+- las fuentes: de qué ficheros del código sale cada regla documentada (ver «Importante»).
+
+Justo antes del POST de actualización, volver a leer el documento y comparar `fields.updated_at` con el del paso 4. Si ha cambiado, alguien lo ha editado mientras tanto: no enviar, enseñar qué ha cambiado, rehacer los cambios sobre la versión nueva y volver a enseñar la vista previa y esperar otro sí antes del POST. El backend no tiene bloqueo optimista, así que un POST con lo leído antes machacaría esa edición.
+
 **Si creas** un documento nuevo:
 - Identificar el `document_id` del padre en el paso 3
 - `POST /documents/new` con todos los campos, incluyendo `document_id`, y con `teams` y `roles` del padre
@@ -195,7 +211,7 @@ Palabras que frecuentemente se escriben sin tilde por error:
 
 **Si actualizas** un documento existente:
 - Enviar TODOS los campos con el contenido completo. Los campos omitidos o con `null` borran el contenido
-- `POST /documents/{id}` con el body completo leído en el paso 4 más los cambios aplicados, incluidos `document_id`, `is_published`, `teams` y `roles` tal como estaban
+- `POST /documents/{id}` con el body completo leído en el paso 4 más los cambios aplicados, incluidos `document_id`, `is_published`, `teams` y `roles` tal como estaban, y el contenido con `--content-from nuevo.md`
 
 6. **Verificar**: `GET /documents/{id}?include=teams,roles` para confirmar que el resultado es el esperado: al actualizar, que `teams`, `roles` y `fields.is_public` no han cambiado; al crear, que `roles` no ha quedado vacío salvo que el usuario lo pidiera
 

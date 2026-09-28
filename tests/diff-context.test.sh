@@ -321,6 +321,81 @@ printf '#!/bin/sh\nexit 1\n' > "$ROOT/bin/gh"
 PATH="$ROOT/bin:$PATH" run --pr 42
 expect_code "pr: gh falla sale con 2" 2
 
+
+# DIFF_U0 ejecutado de verdad: sin líneas de contexto y con las añadidas
+expect_u0_runs() {
+  local cmd out
+  cmd=$(field DIFF_U0)
+  out=$(bash -c "$cmd" 2>/dev/null)
+  if printf '%s\n' "$out" | grep -q '^+[^+]' && ! printf '%s\n' "$out" | grep -q '^ '; then ok; else ko "$1: DIFF_U0 roto o con contexto: $cmd"; fi
+}
+
+# --path con fuente rama y último commit (el -z iba detrás del pathspec y salía vacío)
+new_repo path-rama "${MONO[@]}" apps/web/src/b.js
+printf 'l1\nl2\nl3\nl4\nl5\n' > apps/web/src/a.js && git commit -qam base
+git checkout -qb feat
+printf 'l1\nl2\nNUEVA\nl3\nl4\nl5\n' > apps/web/src/a.js && echo y >> apps/web/src/b.js && git commit -qam cambio
+cd apps/web
+run --path src/a.js
+expect "path + rama: fuente" "FUENTE=rama:main...HEAD"
+expect "path + rama: un fichero" "FICHEROS=1"
+expect_diff_runs "path + rama"
+expect_u0_runs "path + rama"
+git checkout -q main && git merge -q --ff-only feat
+run --path src/a.js
+expect "path + último commit: fuente" "FUENTE=ultimo-commit"
+expect "path + último commit: un fichero" "FICHEROS=1"
+expect_u0_runs "path + último commit"
+cd "$ROOT/path-rama"
+run
+expect_u0_runs "último commit sin path"
+
+# STAGED_LIMPIO: lo staged tiene además cambios sin stagear en el mismo fichero
+new_repo staged-sucio "${MONO[@]}" apps/web/src/b.js
+echo uno >> apps/web/src/a.js && git add apps/web/src/a.js && echo dos >> apps/web/src/a.js
+run
+expect "staged con el mismo fichero sin stagear" "STAGED_LIMPIO=no"
+expect_u0_runs "staged"
+new_repo staged-limpio "${MONO[@]}" apps/web/src/b.js
+echo uno >> apps/web/src/a.js && git add apps/web/src/a.js && echo dos >> apps/web/src/b.js
+run
+expect "staged limpio aunque haya otros sin stagear" "STAGED_LIMPIO=si"
+git reset -q
+run
+expect "tras reset: unstaged" "FUENTE=unstaged"
+expect_no "unstaged no imprime STAGED_LIMPIO" "STAGED_LIMPIO=si"
+
+# PR: checkout de la cabeza con origin/{base} y merge commit de GitHub Actions
+new_repo pr-merge "${MONO[@]}"
+MAIN_SHA=$(git rev-parse HEAD)
+git update-ref refs/remotes/origin/main "$MAIN_SHA"
+git checkout -qb pr && echo y >> apps/web/src/a.js && git commit -qam pr
+PR_SHA=$(git rev-parse HEAD)
+mkdir -p "$ROOT/bin2"
+cat > "$ROOT/bin2/gh" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+  "pr diff 7 --name-only") echo apps/web/src/a.js ;;
+  *headRefOid*) echo "$PR_SHA" ;;
+  *baseRefName*) echo main ;;
+esac
+EOF
+chmod +x "$ROOT/bin2/gh"
+PATH="$ROOT/bin2:$PATH" run --pr 7
+expect "pr en la cabeza: worktree" "PR_EN_WORKTREE=si"
+expect "pr en la cabeza: base" "PR_BASE=origin/main"
+expect "pr en la cabeza: diff sin contexto" "DIFF_U0=git diff --unified=0 origin/main...HEAD"
+expect_u0_runs "pr en la cabeza"
+git checkout -q main && echo z >> packages/core/c.js && git commit -qam base2 && git merge -q --no-ff pr -m "Merge pr"
+PATH="$ROOT/bin2:$PATH" run --pr 7
+expect "pr en merge commit: worktree" "PR_EN_WORKTREE=si"
+expect "pr en merge commit: base" "PR_BASE=HEAD^1"
+expect "pr en merge commit: aviso" "AVISO=HEAD es el merge commit de la PR sobre su base (checkout de GitHub Actions)"
+expect_u0_runs "pr en merge commit"
+git checkout -q --detach "$MAIN_SHA"
+PATH="$ROOT/bin2:$PATH" run --pr 7
+expect "pr: otro commit" "PR_EN_WORKTREE=no"
+
 run --otra
 expect_code "argumento no reconocido" 64
 

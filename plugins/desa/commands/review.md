@@ -19,10 +19,11 @@ Separar de `$ARGUMENTS` los flags (`--verbose`, `-v`) y, con lo que quede, ejecu
 El script elige la fuente en este orden: staged; si no hay, unstaged más los ficheros sin trackear; con el árbol limpio fuera de una rama de integración (main, master, develop, dev), la rama frente a su base, que es la de merge-base más cercana; si no, el último commit. Imprime:
 
 - `REPO`, `RAIZ` (la raíz del repo) y, con `--path`, `ALCANCE`;
-- `FUENTE` y `DIFF`, la orden que da el diff de esa fuente, lista para ejecutar tal cual desde cualquier directorio del repo;
+- `FUENTE` y `DIFF`, la orden que da el diff de esa fuente, lista para ejecutar tal cual desde cualquier directorio del repo, y `DIFF_U0`, el mismo diff sin contexto (Paso 7);
+- con `FUENTE=staged`, `STAGED_LIMPIO` (`no` si algún fichero staged tiene además cambios sin stagear);
 - `TIPOS`, `FICHEROS` y `SIN_TRACKEAR`;
 - `EXCLUIDOS`: ficheros sin trackear de `.claude/`, `.idea/`, `.expo/`, `.vscode/` o `.cursor/`, que no se revisan;
-- en modo PR, `PR_EN_WORKTREE`;
+- en modo PR, `PR_EN_WORKTREE` y, si se conoce la base, `PR_BASE`;
 - un `AVISO` si queda algo fuera de la revisión;
 - tras `FICHEROS:`, la lista de ficheros con rutas relativas a `RAIZ` (`?? ` delante de los sin trackear).
 
@@ -187,7 +188,10 @@ Tras la revisión estática (Pasos 1-5), si el proyecto tiene infraestructura de
 
 > **⚠️ Paso 6 es incondicional respecto a Paso 5.** Aunque Paso 5 haya reportado incidencias importantes o críticas sobre los cambios (código muerto, over-engineering, etc.), Paso 6 SE EJECUTA igual si hay tests configurados. La razón es que Paso 5, Paso 6 y Paso 7 son **fuentes de información complementarias**: estilo/diseño + ejecución de tests + cobertura. El dev consolida las tres en el reporte final y decide. No omitir Paso 6 porque los cambios "parezcan mejorables" — siempre es informativo conocer si rompen tests o bajan cobertura.
 
-**En modo PR**, ejecutar este paso y el 7 solo si `PR_EN_WORKTREE=si`, es decir, si el working tree es exactamente el commit de la PR y está limpio. Si no, los tests correrían sobre otro código: anotar `Tests: omitidos (la PR #N no está en el working tree)` y no hacer checkout por cuenta propia.
+**Cuándo no se ejecuta** este paso ni el 7, porque los tests correrían sobre otro código:
+
+- modo PR con `PR_EN_WORKTREE=no`, es decir, cuando el working tree no es el commit de la PR. Anotar `Tests: omitidos (la PR #N no está en el working tree)` y no hacer checkout por cuenta propia. `PR_EN_WORKTREE=si` también vale en el merge commit que deja el checkout de GitHub Actions;
+- `FUENTE=staged` con `STAGED_LIMPIO=no`: los ficheros revisados tienen además cambios sin stagear, y los tests verían el working tree. Anotar `Tests: omitidos (hay cambios sin stagear en ficheros del diff)`.
 
 ### Detección del runner de tests
 
@@ -195,36 +199,47 @@ Tras la revisión estática (Pasos 1-5), si el proyecto tiene infraestructura de
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/test-context.sh
 ```
 
-Imprime `STACK`, `RUNNER` (`pest`, `phpunit`, `vitest`, `no-instalado` o `ninguno`), `COBERTURA` (`xdebug`, `pcov`, `v8`, `istanbul` o `ninguna`), `PLAYWRIGHT`, `E2E_SMOKE` (specs en `tests/e2e/smoke`) y `DIFF_COVERAGE` (si el proyecto tiene `scripts/diff-coverage.mjs`). El runner sale de lo que está instalado, no de que exista `phpunit.xml`.
+Imprime:
 
-- `RUNNER=ninguno` → anotar `Tests: sin runner configurado` y continuar al Paso 7. No es error.
+- `RAIZ` (todas las órdenes de los Pasos 6 y 7 se ejecutan desde ahí: `cd {RAIZ} && …`) y `STACK`;
+- `RUNNER` (`pest`, `phpunit`, `vitest`, `no-instalado` o `ninguno`), que sale de lo que está instalado, no de que exista `phpunit.xml`;
+- `COBERTURA` (`xdebug`, `pcov`, `v8`, `istanbul` o `ninguna`), solo si el driver está activo;
+- `PLAYWRIGHT`, `E2E_SMOKE` (specs en `tests/e2e/smoke`) y `DIFF_COVERAGE` (si el proyecto tiene `scripts/diff-coverage.mjs`);
+- en backend, `ENTORNO_TEST`.
+
+- `RUNNER=ninguno` → anotar `Tests: sin runner configurado` (en el monorepo, `sin runner para este stack`) y continuar al Paso 7. No es error.
 - `RUNNER=no-instalado` → anotar `Tests: no ejecutables (runner configurado pero no instalado)` y omitir el Paso 7.
 
 ### Ejecución por project type
 
 #### project_type = backend (PHPUnit o Pest)
 
-Siempre con `APP_ENV=testing` delante y siempre con ficheros de test concretos, nunca un directorio ni la suite completa. Motivo: `phpunit.xml` declara `APP_ENV=testing` sin `force`, así que el valor lo decide el shell; con otro `APP_ENV`, Laravel puede cargar `.env` y apuntar a la BD real, y en grupodesa-backend lanzar un directorio con `RefreshDatabase` hizo `migrate:fresh` contra producción (31-07-2026).
+**Solo con `ENTORNO_TEST=aislado`.** Con `APP_ENV=testing`, la BD la decide el `<env>` de `phpunit.xml`; si no la fija, `.env.testing`; y si no existe, `.env`, que en varios proyectos es la BD real, incluso la de producción. Un test con `RefreshDatabase` hace entonces `migrate:fresh` sobre ella: en grupodesa-backend ya pasó con un directorio lanzado bajo `APP_ENV=local` (31-07-2026). Con `no-aislado` o `desconocido`, no ejecutar ningún test: anotar `Tests: no ejecutables (entorno de tests no aislado: {motivo de ENTORNO_TEST})` y omitir el Paso 7.
+
+Con entorno aislado, siempre con `APP_ENV=testing` delante y siempre con ficheros de test concretos, nunca un directorio ni la suite completa.
 
 1. Derivar los ficheros de test del diff con Glob: para `app/Services/Foo/BarService.php`, los `tests/Feature/Foo/Bar*Test.php` y `tests/Unit/Foo/Bar*Test.php` que existan; un fichero de test del diff cuenta por sí mismo. Si no sale ninguno, no ejecutar nada y anotar `Tests: sin test asociado al diff`.
-2. Si el `CLAUDE.md` del proyecto dice que un test necesita otro `APP_ENV` o la BD real (en grupodesa-backend, los feature tests de precios y pedidos), no ejecutarlo desde la revisión: anotarlo como `requiere BD real, no ejecutado`.
-3. Escribir el comando exacto y ejecutarlo, con los ficheros como argumentos posicionales:
+2. Si el `CLAUDE.md` del proyecto dice que un test necesita otro `APP_ENV` o la BD real (en grupodesa-backend, los feature tests de precios y pedidos), no ejecutarlo desde la revisión: contarlo como «requiere BD real, no ejecutado».
+3. Escribir la orden exacta y ejecutarla en una sola llamada, con los ficheros como argumentos posicionales:
     ```bash
-    APP_ENV=testing ./vendor/bin/{RUNNER} tests/Feature/Foo/BarServiceTest.php tests/Unit/Foo/BarTest.php
+    cd {RAIZ} && APP_ENV=testing ./vendor/bin/{RUNNER} tests/Feature/Foo/BarServiceTest.php tests/Unit/Foo/BarTest.php
     ```
     Nunca pasar rutas en `--filter`: compara nombres de test, no rutas, y con una ruta no ejecuta nada y sale con 0.
-    Cobertura solo si `COBERTURA` es `xdebug` o `pcov`: añadir `--coverage-clover "$TMPDIR/desa-review-coverage.xml"` (vale para PHPUnit y Pest, y deja el informe fuera del repo). Si es `ninguna`, anotar `Cobertura del diff: no disponible (sin xdebug ni pcov)`: el Paso 7 no se ejecuta.
+    Cobertura solo si `COBERTURA` es `xdebug` o `pcov`, con un informe nuevo en cada revisión y fuera del repo (con xdebug, `XDEBUG_MODE=coverage` delante):
+    ```bash
+    COV=$(mktemp -d)/clover.xml && cd {RAIZ} && XDEBUG_MODE=coverage APP_ENV=testing ./vendor/bin/{RUNNER} --coverage-clover "$COV" {ficheros}; echo "COV=$COV"
+    ```
+    Si el fichero no existe tras la ejecución o la salida trae «No filter is configured», «Incorrect filter configuration» o «has to be set», el runner no ha generado informe: anotar `Cobertura del diff: no disponible (el runner no generó informe: {aviso})`. PHPUnit 11 ignora el `<coverage><include>` antiguo de `phpunit.xml` y pide `<source>`. Con `COBERTURA=ninguna`, anotar `Cobertura del diff: no disponible (sin xdebug ni pcov)`: el Paso 7 no se ejecuta.
 4. Capturar exit code y output, y contar pasados, saltados y fallidos. Con `APP_ENV=testing`, los tests que necesitan MySQL se saltan por su guard: cuentan como saltados, no como pasados.
 
 #### project_type = websites (Vitest + opcional Playwright)
 
-1. Derivar los tests del diff buscando por nombre con Glob: para `src/**/<X>.{js,jsx}`, `tests/unit/**/<X>.test.{js,jsx}`. Un fichero de test del diff cuenta por sí mismo. Si no sale ninguno, ejecutar la suite unitaria entera sin filtro: en websites es segura (jsdom y MSW, sin BD ni red real) y así el Paso 7 tiene la cobertura de los ficheros del diff. Anotar `Tests: sin test asociado al diff`, seguido del resultado de la suite.
-2. Ejecutar:
+1. Ejecutar la suite unitaria entera, como hace CI. En websites es segura (jsdom y MSW, sin BD ni red real) y así la cobertura coincide con la de CI:
     ```bash
-    npx vitest run --coverage [ficheros-de-test, o nada para la suite unitaria]
+    cd {RAIZ} && npx vitest run --coverage
     ```
-    Sin `COBERTURA` (`ninguna`), ejecutar sin `--coverage` y anotar `Cobertura del diff: no disponible`.
-3. Si `PLAYWRIGHT=si` y hay specs de `tests/e2e/smoke/` relacionadas con el diff, ejecutar también `npx playwright test [specs]`. Si `E2E_SMOKE=0`, omitir Playwright y anotarlo en la línea de Tests (`E2E: sin specs`).
+    Sin `COBERTURA` (`ninguna`), ejecutar sin `--coverage` y anotar `Cobertura del diff: no disponible (sin @vitest/coverage-v8)`.
+2. Si `PLAYWRIGHT=si` y hay specs de `tests/e2e/smoke/` relacionadas con el diff, ejecutar también `npx playwright test [specs]`. Si `E2E_SMOKE=0`, omitir Playwright y añadirlo a la línea de Tests (` · E2E: sin specs`).
 
 #### project_type = frontend (monorepo) y mobile
 
@@ -232,20 +247,21 @@ El equipo aún no ha definido el runner de tests del monorepo ni el de mobile (p
 
 ### Interpretación del resultado
 
-- **Todos los tests pasan, exit 0** → Anotar para la línea `Tests` del Paso 8: `N pasados · M saltados · K fallidos`, con el comando usado. Si el runner no ha ejecutado ningún test («No tests executed!», 0 tests), no es verde: anotar `Tests: 0 ejecutados` y el motivo. Continuar al Paso 7.
+- **Todos los tests pasan, exit 0** → Anotar para la línea `Tests` del Paso 8: `N pasados · M saltados · K fallidos`, con la orden usada. Si el runner no ha ejecutado ningún test («No tests executed!», 0 tests), no es verde: anotar `Tests: 0 ejecutados` y el motivo. Continuar al Paso 7.
 - **Algún test falla** → Anotar `fichero:test:error` y, por cada test que falla, diagnosticar antes de proponer nada:
     - **Regresión**: el cambio rompe un comportamiento que el test protege. Es una incidencia **Crítica** del informe, y la acción propuesta es corregir el código fuente, no el test.
     - **Test desactualizado**: el cambio de comportamiento es intencionado (lo dicen el diff, el mensaje del commit o el usuario). La acción propuesta es actualizar el test.
+    - **Fallo ajeno al diff**: el test no cubre código del diff y el error apunta a otra causa (datos, red, un deadlock, un test inestable). Se informa sin acción propuesta y no bloquea el Paso 7 para los ficheros del diff.
 
-    No tocar nada durante la revisión. Las correcciones van al bloque «Acciones propuestas» del Paso 8, al final del informe completo, y el fallo se queda en el informe aunque después se corrija. Si el dev acepta actualizar tests, aplicarlo y volver a ejecutar (máximo 3 iteraciones); si vuelve a verde, seguir con el Paso 7 y actualizar el informe. Si tras 3 iteraciones sigue fallando, devolver el control al dev sin más cambios.
+    No tocar nada durante la revisión. Las correcciones van al bloque «Acciones propuestas» del Paso 8, al final del informe completo, y el fallo se queda en el informe aunque después se corrija. Si el dev elige alguna acción, aplicarla y volver a ejecutar los tests afectados (máximo 3 iteraciones); si vuelve a verde, seguir con el Paso 7 y actualizar el informe. Si tras 3 iteraciones sigue fallando, devolver el control al dev sin más cambios.
 - **Tests no ejecutables** (error de configuración, no error de test) → Anotar `Tests: no ejecutables ({motivo})` y omitir Paso 7. NO intentar arreglar la configuración.
 
 ### Reglas estrictas para esta fase
 
 - **Nunca** modificar el código fuente del proyecto en esta fase. Una regresión se reporta como Crítica con la corrección propuesta. Solo se aplica si el dev la elige en «Acciones propuestas», al final del informe.
 - **Nunca** generar tests nuevos aquí — eso es Paso 7.
-- **Nunca** continuar a Paso 7 mientras haya tests fallando.
-- **Nunca** ejecutar un directorio, una suite completa ni un `APP_ENV` distinto de `testing` en backend.
+- **Nunca** continuar a Paso 7 mientras haya tests del diff fallando.
+- **Nunca** ejecutar tests de backend sin `ENTORNO_TEST=aislado`, ni un directorio, una suite completa o un `APP_ENV` distinto de `testing`.
 
 ## Paso 7: Generar tests faltantes (solo si Paso 6 pasó y la cobertura es insuficiente)
 
@@ -260,12 +276,12 @@ Si no hay líneas del diff sin cubrir, anotar `Cobertura del diff: sin líneas s
 
 ### Identificación de gaps
 
-- **websites con `DIFF_COVERAGE=si` y `FUENTE=rama:{base}...HEAD`**: usar el script del propio proyecto, que es el mismo gate que aplica CI (80 % de las líneas nuevas):
+- **websites con `DIFF_COVERAGE=si` y una base** (`FUENTE=rama:{base}...HEAD`, o modo PR con `PR_BASE`): usar el script del propio proyecto, que CI aplica sobre el mismo lcov de la suite entera (80 % de las líneas nuevas):
     ```bash
-    DIFF_COVERAGE_BASE={base} node scripts/diff-coverage.mjs
+    cd {RAIZ} && DIFF_COVERAGE_BASE={base o PR_BASE} node scripts/diff-coverage.mjs
     ```
-    Lista, por fichero, las líneas nuevas sin cubrir. Solo mira cambios commiteados, así que no sirve con `FUENTE=staged` o `unstaged`.
-- **En el resto de casos**, cruzar el informe de cobertura del Paso 6 (`coverage/lcov.info` en websites, `$TMPDIR/desa-review-coverage.xml` en backend) con las líneas añadidas del diff (`DIFF` con `--unified=0`).
+    Lista, por fichero, las líneas nuevas sin cubrir. Sale con 1 cuando no llega al 80 %: no es un error del script. Mide todo `src/`, así que con `ALCANCE` hay que quedarse solo con los ficheros de esa ruta. Solo mira cambios commiteados: no sirve con `FUENTE=staged` o `unstaged`.
+- **En el resto de casos**, cruzar el informe de cobertura del Paso 6 (`coverage/lcov.info` en websites, el `COV` que imprimió la orden en backend) con las líneas añadidas que da `DIFF_U0`, ejecutado tal cual.
 
 De ahí salen los ficheros con líneas nuevas o modificadas sin cubrir, y las funciones y ramas concretas que faltan.
 
@@ -279,15 +295,15 @@ Para cada gap detectado:
     - backend: `tests/Unit/{Domain}/` o `tests/Feature/{Domain}/`
     - websites: el directorio de `tests/unit/` donde están los tests de ficheros vecinos (p. ej. `tests/unit/hooks/` para `src/hooks/`)
 4. **Ejecutar el test recién generado** con el mismo runner y las mismas reglas del Paso 6:
-    - backend: `APP_ENV=testing ./vendor/bin/{RUNNER} tests/ruta/NuevoTest.php`
-    - websites: `npx vitest run tests/unit/ruta/nuevo.test.{js,jsx}`
+    - backend: `cd {RAIZ} && APP_ENV=testing ./vendor/bin/{RUNNER} tests/ruta/NuevoTest.php`
+    - websites: `cd {RAIZ} && npx vitest run tests/unit/ruta/nuevo.test.{js,jsx}`
 5. **Si pasa** → siguiente gap
 6. **Si falla** → leer error, corregir el test (NUNCA el código fuente), reintentar
 7. **Si tras 3 iter sigue fallando** → borrar el borrador del árbol y llevarlo al informe con el último error. No dejar en el repo tests rojos ni comentarios `FIXME`
 
 ### Tras procesar todos los gaps
 
-- `git add` solo de los ficheros de test que ha creado la skill, y de los que ha modificado si antes no tenían cambios del dev (comprobarlo con `git status --porcelain -- {fichero}` antes de tocarlos). Si un test ya tenía cambios del dev, dejarlo sin stagear y listarlo: un `git add` metería también hunks que el dev no quería
+- `git add` solo de los ficheros de test que ha creado la skill, y de los que ha modificado si antes no tenían cambios del dev (comprobarlo con `git -C {RAIZ} status --porcelain -- {fichero}` antes de tocarlos). Si un test ya tenía cambios del dev, dejarlo sin stagear y listarlo: un `git add` metería también hunks que el dev no quería
 - **NUNCA** `git commit` ni `git push`
 - Anotar para la línea `Cobertura del diff` del Paso 8: líneas sin cubrir, tests generados y gaps que no han convergido
 
@@ -335,7 +351,7 @@ Para cada gap detectado:
 **Resumen**: X críticos · Y importantes · Z menores
 ```
 
-Si el Paso 6 dejó correcciones pendientes (tests en rojo), añadir tras el Resumen un bloque con las acciones numeradas, y preguntar al final cuáles aplicar:
+El informe termina siempre en este orden: incidencias, Resumen, «Descartadas» (con `--verbose`) y «Acciones propuestas». Las acciones van en cualquiera de las dos plantillas, también en la de «Sin incidencias», y la pregunta es lo último del informe. Si el Paso 6 dejó correcciones pendientes (tests en rojo), el bloque es:
 
 ```
 ### Acciones propuestas
@@ -346,7 +362,7 @@ Si el Paso 6 dejó correcciones pendientes (tests en rojo), añadir tras el Resu
 ¿Aplico alguna? Indica los números.
 ```
 
-Si modo verbose (`--verbose` o `-v`), añadir al final:
+Si modo verbose (`--verbose` o `-v`), añadir antes de «Acciones propuestas»:
 
 ```
 ### Descartadas (confianza < 75)
@@ -358,16 +374,20 @@ Valores de las líneas `Tests` y `Cobertura del diff`:
 
 | Línea | Valor | Cuándo |
 |---|---|---|
-| Tests | `N pasados · M saltados · K fallidos` | se ejecutaron tests; añadir ` · C tests existentes corregidos` si el bucle del Paso 6 los modificó, y ` · R requieren BD real, no ejecutados` si hubo alguno |
+| Tests | `N pasados · M saltados · K fallidos` | se ejecutaron tests; añadir ` · C tests existentes corregidos` si el bucle del Paso 6 los modificó, ` · R requieren BD real, no ejecutados` si hubo alguno y ` · E2E: sin specs` si aplica |
 | Tests | `0 ejecutados ({motivo})` | el runner no ejecutó ninguno: no es verde |
-| Tests | `sin runner configurado` · `sin runner para este stack` | no hay runner (Paso 6) |
+| Tests | `sin runner configurado` | no hay runner (Paso 6) |
+| Tests | `sin runner para este stack` | monorepo y mobile |
 | Tests | `sin test asociado al diff` | no hay ningún test de los ficheros del diff |
+| Tests | `R requieren BD real, no ejecutados` | todos los tests del diff necesitan la BD real |
+| Tests | `no ejecutables (entorno de tests no aislado: {motivo})` | backend con `ENTORNO_TEST` distinto de `aislado` |
+| Tests | `omitidos (hay cambios sin stagear en ficheros del diff)` | `FUENTE=staged` con `STAGED_LIMPIO=no` |
 | Tests | `no ejecutables ({motivo})` | error de configuración, no de test |
 | Tests | `omitidos (la PR #N no está en el working tree)` | modo PR con `PR_EN_WORKTREE=no` |
 | Cobertura del diff | `sin líneas sin cubrir` | el Paso 7 no encontró huecos |
 | Cobertura del diff | `K líneas sin cubrir → T tests generados, G sin converger` | el Paso 7 se ejecutó |
 | Cobertura del diff | `no evaluada ({tests en rojo · no ejecutables · 0 ejecutados})` | el Paso 7 no se ejecutó por el resultado del Paso 6 |
-| Cobertura del diff | `no disponible ({motivo})` | sin runner, sin driver de cobertura o tests omitidos |
+| Cobertura del diff | `no disponible ({motivo})` | sin runner, sin driver de cobertura, tests omitidos, sin test asociado, solo tests de BD real o el runner no generó informe |
 
 Omitir secciones de severidad vacías. Las líneas de cabecera no se omiten: si algo no se ha hecho, la línea dice por qué, para que «tests en verde» y «no se ejecutó nada» no se confundan. Si no hay incidencias:
 

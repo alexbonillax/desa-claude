@@ -5,6 +5,72 @@ All notable changes to the `desa` plugin will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.14.0] — 2026-09-28
+
+### Security
+
+- **El token de la API ya no pasa por la conversación ni por los comandos** — `/desa:wiki` y `/desa:translations` lo imprimían con un `python3 -c` y lo pegaban en cada `curl`, así que acababa en el transcript, en los avisos de permiso y en `ps`. Ahora todo pasa por `plugins/desa/scripts/desa_api.py`, que:
+  - lo lee por su cuenta, en este orden: `DESA_API_TOKEN`, `~/.config/desa/api-token` y las claves `desa_api_token` o `desa_wiki_token` de `~/.claude/settings.json`;
+  - no lo imprime nunca, tampoco si tiene espacios o caracteres de control (entonces responde `TOKEN_INVALIDO` sin enseñarlo);
+  - solo lo envía a `api2.grupodesa.app`: no sigue redirecciones (la API tiene GET que redirigen a S3 o a Factorial) y solo admite las rutas de la wiki y de terms (`/documents…`, `/terms…`, `/locales`), así que un GET preaprobado no puede llegar, por ejemplo, a `/customers/{id}/token`.
+
+  Para guardarlo sin pegarlo en el chat: `! pbpaste | python3 …/desa_api.py set-token --stdin` (fichero 600, carpeta 700). A quien ya lo tenga en `desa_wiki_token` no le hace falta cambiar nada. No se mueve a la clave `env` de settings.json porque eso lo exportaría a todos los procesos de Bash.
+- **El Paso 6 de `/desa:review` no ejecuta tests de backend si el entorno no está aislado** — `APP_ENV=testing` solo es seguro si `phpunit.xml` o `.env.testing` fijan una BD sqlite. En grupodesa-api, gdapps y desa-connect no es así (el sqlite de `phpunit.xml` está comentado y no hay `.env.testing`), así que Laravel carga `.env`, que es MySQL remoto, y un test con `RefreshDatabase` haría `migrate:fresh` sobre él. `test-context.sh` imprime ahora `ENTORNO_TEST=aislado|no-aislado|desconocido` con el motivo, y sin `aislado` la revisión no ejecuta ningún test. Hoy solo grupodesa-backend está aislado.
+
+### Added
+
+- **`scripts/terms.py`** para `/desa:translations`: `project`, `locales`, `find`, `search`, `upsert`, `delete` y `sync`. Sin `--apply` no escribe nada y enseña lo que haría. Además:
+  - pagina, y aborta sin escribir ni en la API ni en local ante cualquier error HTTP;
+  - calcula los cambios locales antes de escribir en la API. Si la escritura local falla después, lo dice aparte con `ERROR_LOCAL`;
+  - escribe los ficheros con el orden y el formato actuales: regenerar los 6 JSON de grupodesa-front y los 13 PHP de grupodesa-backend da bytes idénticos;
+  - lee los PHP de idioma sin ejecutarlos, con un parser propio que coincide con PHP en los 110 ficheros planos de los backends del equipo. Si un fichero no es plano, se niega y pide `--allow-php`, que no está preaprobado;
+  - aplica el escapado de `php_str()`;
+  - valida los idiomas contra `/locales` y las rutas contra la raíz de idiomas;
+  - normaliza los `value` vacíos, `null` o `[]` de la API;
+  - no toca los ficheros propios de Laravel;
+  - saca los namespaces de backend de los ficheros locales, no toca los que la API no gestiona y marca como `NAMESPACE_AJENO` los que se llaman igual que uno de la API pero no comparten ninguna clave. En gdapps, el `app` local no comparte ninguna clave con el `app` de grupodesa: sin esa marca, un sync propondría 1.258 bajas;
+  - reconoce `lang/` además de `resources/lang/`.
+- Pruebas con la biblioteca estándar en `tests/test_desa_api.py` y `tests/test_terms.py` (63). Usan servidores HTTP locales y una API simulada, y comprueban, entre otras cosas:
+  - los tres casos de `php_str()` de P0-2, con ida y vuelta en PHP;
+  - que el token no sale por stdout ni por stderr, ni con una redirección ni con un salto de línea;
+  - que no se escribe nada si la API falla en la página 2 o si un fichero local está roto;
+  - que el dry-run de sync no ejecuta el PHP del repo.
+
+### Fixed
+
+- **`diff-context.sh`**:
+  - con `--path` y la fuente rama o último commit, `-z` quedaba detrás del pathspec y la revisión salía vacía (`FUENTE=ninguna`);
+  - el modo PR acepta el merge commit que deja el checkout de GitHub Actions;
+  - con `FUENTE=staged`, `STAGED_LIMPIO=no` avisa de que los ficheros revisados tienen además cambios sin stagear, y entonces no se ejecutan tests;
+  - `DIFF_U0` da el diff sin contexto listo para ejecutar en todas las fuentes, y `PR_BASE` da la base de la PR.
+
+  Pasa de 109 a 132 pruebas.
+- **Pasos 6 y 7 de `/desa:review`**:
+  - las órdenes se ejecutan desde `RAIZ`;
+  - el informe de cobertura va a una ruta nueva en cada revisión, con `XDEBUG_MODE=coverage`, y si el runner no lo genera (PHPUnit 11 ignora el `<coverage><include>` antiguo) se dice;
+  - `test-context.sh` solo da `pcov` si está activo;
+  - en websites se ejecuta la suite unitaria entera, como CI, para que los huecos de cobertura sean los mismos;
+  - un test en rojo puede ser también un «fallo ajeno al diff», que no bloquea el Paso 7;
+  - la tabla de valores de Tests y Cobertura cubre todos los caminos, y el informe termina siempre en incidencias, Resumen, Descartadas y Acciones propuestas.
+
+  `test-context.sh` pasa de 22 a 30 pruebas.
+
+### Changed
+
+- **`/desa:wiki`**:
+  - antes de cualquier POST enseña una vista previa (acción, padre, visibilidad, fuentes) y espera un sí explícito, como ya hacía con el DELETE. El diff de una actualización se hace contra el texto real de la API: `GET … --save-content`, Edit y `POST … --content-from`, así que los párrafos que no se tocan viajan tal cual;
+  - justo antes de actualizar vuelve a leer la página, porque el backend no tiene bloqueo optimista. Si `updated_at` ha cambiado, no envía nada y vuelve a pedir confirmación;
+  - todos los parámetros van en `--param`, así que los espacios, `&` o `#` ya no rompen la petición.
+- **`/desa:translations`** pasa de 439 a 179 líneas: toda la operativa va por `terms.py`, y salen los siete ejemplos de `curl` con el token en línea, el script de paginación que se regeneraba en cada sesión y los ejemplos en portugués de Brasil (`Salvar`), porque los datos son pt-PT. La confirmación va antes de sobrescribir valores, de publicar traducciones propuestas por el modelo o de corregir la ortografía del usuario, y en el sync, cuando hay bajas o cambios sin commitear. Además:
+  - si el `CLAUDE.md` del proyecto pide todos los idiomas, se proponen los que falten;
+  - la tabla de errores queda alineada con la de la wiki;
+  - ante «actualiza las traducciones», que es ambiguo, pregunta.
+- `allowed-tools` de wiki y translations preaprueba solo `token-status`, `workdir`, `desa_api.py GET` (limitado a las rutas de la wiki y de terms) y los subcomandos de `terms.py` que no escriben ni ejecutan PHP. `POST`, `DELETE`, `--apply` y `--allow-php` piden permiso.
+
+### Notes
+
+- Es el bloque 4 de la auditoría, con las correcciones de la verificación de los bloques 3 y 4.
+
 ## [1.13.0] — 2026-09-28
 
 ### Fixed
@@ -16,7 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - un borrador que no converge se borra del árbol y va al informe con su error: ya no se dejan tests rojos con `// FIXME` ni se stagean;
   - `git add` solo toca los tests que ha creado la skill y los que no tenían cambios del dev, para no stagear hunks ajenos;
   - los tests generados no pueden usar `RefreshDatabase` ni `DatabaseMigrations`;
-  - en websites, si la fuente es una rama, los huecos se sacan con el `scripts/diff-coverage.mjs` del proyecto, el mismo gate que CI;
+  - en websites, si la fuente es una rama, los huecos se sacan con el `scripts/diff-coverage.mjs` del proyecto, el mismo gate que CI (comprobado en el `main` de desa-websites en GitHub; algún clon local es anterior y no lo tiene);
   - el test nuevo va junto a sus vecinos de `tests/unit/`, en vez de «espejando `src/`», que no coincide con la estructura real.
 
 ### Changed

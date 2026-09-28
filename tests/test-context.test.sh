@@ -19,9 +19,14 @@ proj() {
   for f in "$@"; do mkdir -p "$(dirname "$f")"; : > "$f"; done
 }
 exe() { for f in "$@"; do mkdir -p "$(dirname "$f")"; printf '#!/bin/sh\n' > "$f"; chmod +x "$f"; done; }
-fake_php() {
+fake_php() {  # fake_php NOMBRE MODULO [pcov.enabled]
   mkdir -p "$ROOT/bin-$1"
-  printf '#!/bin/sh\n[ "$1" = "-m" ] && printf "[PHP Modules]\\nCore\\n%s\\n" "%s"\n' "$2" > "$ROOT/bin-$1/php"
+  cat > "$ROOT/bin-$1/php" <<EOF
+#!/bin/sh
+[ "\$1" = "-m" ] && printf '[PHP Modules]\\nCore\\n%s\\n' "$2"
+[ "\$1" = "-r" ] && printf '%s' "${3:-1}"
+exit 0
+EOF
   chmod +x "$ROOT/bin-$1/php"
 }
 
@@ -34,6 +39,7 @@ expect() {
 fake_php none "Json"
 fake_php xdebug "Xdebug"
 fake_php pcov "pcov"
+fake_php pcov-off "pcov" 0
 
 proj phpunit artisan composer.json phpunit.xml
 exe vendor/bin/phpunit
@@ -43,6 +49,10 @@ expect "phpunit: runner" "RUNNER=phpunit"
 expect "phpunit: sin driver" "COBERTURA=ninguna"
 PATH="$ROOT/bin-xdebug:$PATH" run
 expect "phpunit: xdebug" "COBERTURA=xdebug"
+
+PATH="$ROOT/bin-pcov-off:$PATH" run
+expect "pcov instalado pero desactivado no cuenta" "COBERTURA=ninguna"
+expect "raíz" "RAIZ=$(cd "$ROOT/phpunit" && pwd -P)"
 
 proj pest artisan composer.json phpunit.xml
 exe vendor/bin/pest vendor/bin/phpunit
@@ -90,6 +100,34 @@ exe vendor/bin/phpunit
 cd app
 PATH="$ROOT/bin-none:$PATH" run
 expect "desde subdirectorio" "RUNNER=phpunit"
+
+
+# Entorno de tests efectivo del backend con APP_ENV=testing
+proj env-phpunit artisan composer.json
+printf '<phpunit>\n  <php>\n    <env name="APP_ENV" value="testing"/>\n    <env name="DB_CONNECTION" value="sqlite"/>\n  </php>\n</phpunit>\n' > phpunit.xml
+printf 'DB_CONNECTION=mysql\n' > .env
+PATH="$ROOT/bin-none:$PATH" run
+expect "phpunit.xml con sqlite" "ENTORNO_TEST=aislado (DB_CONNECTION=sqlite desde phpunit.xml)"
+
+proj env-comentado artisan composer.json
+printf '<phpunit>\n  <php>\n    <!-- <env name="DB_CONNECTION" value="sqlite"/> -->\n  </php>\n</phpunit>\n' > phpunit.xml
+printf 'APP_NAME=x\nDB_CONNECTION=mysql\nDB_HOST=db.example.amazonaws.com\n' > .env
+PATH="$ROOT/bin-none:$PATH" run
+expect "sqlite comentado y sin .env.testing" "ENTORNO_TEST=no-aislado (DB_CONNECTION=mysql desde .env (no hay .env.testing))"
+printf 'DB_CONNECTION="sqlite"\nDB_DATABASE=:memory:\n' > .env.testing
+PATH="$ROOT/bin-none:$PATH" run
+expect "con .env.testing sqlite" "ENTORNO_TEST=aislado (DB_CONNECTION=sqlite desde .env.testing)"
+printf 'DB_CONNECTION=mysql\n' > .env.testing
+PATH="$ROOT/bin-none:$PATH" run
+expect ".env.testing con mysql" "ENTORNO_TEST=no-aislado (DB_CONNECTION=mysql desde .env.testing)"
+
+proj env-nada artisan composer.json phpunit.xml
+PATH="$ROOT/bin-none:$PATH" run
+expect "sin DB_CONNECTION en ningún sitio" "ENTORNO_TEST=desconocido (no se encuentra DB_CONNECTION)"
+
+proj env-web next.config.js
+run
+if printf '%s\n' "$OUT" | grep -q '^ENTORNO_TEST='; then FAIL=$((FAIL + 1)); echo "FALLO: websites no debe imprimir ENTORNO_TEST"; else PASS=$((PASS + 1)); fi
 
 printf '\n%s pruebas OK, %s fallos\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

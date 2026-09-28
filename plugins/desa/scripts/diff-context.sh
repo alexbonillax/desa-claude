@@ -12,8 +12,9 @@
 # el último commit.
 #
 # Salida: líneas CLAVE=valor y, tras "FICHEROS:", un fichero por línea relativo a RAIZ
-# ("?? " delante si está sin trackear). DIFF es una orden lista para ejecutar desde cualquier
-# directorio del repo. Exit: 0 bien, 1 no es un repo git, 2 fallo de gh, 3 fallo de git,
+# ("?? " delante si está sin trackear). DIFF y DIFF_U0 (el mismo diff sin contexto, para cruzar
+# líneas añadidas con la cobertura) son órdenes listas para ejecutar desde cualquier directorio
+# del repo. Exit: 0 bien, 1 no es un repo git, 2 fallo de gh, 3 fallo de git,
 # 64 uso incorrecto.
 
 set -u
@@ -84,10 +85,12 @@ read_status() {
   done < "$TMP"
 }
 
-# Nombres de un git diff/diff-tree en $FILES; sale con 3 si git falla.
+# Nombres de un git diff/diff-tree en $FILES; sale con 3 si git falla. -z va justo tras el
+# subcomando: detrás de un "--" git lo tomaría como pathspec.
 read_names() {
-  local n
-  g "$@" -z > "$TMP" 2>/dev/null || die 3 "falló: git $*"
+  local n sub=$1
+  shift
+  g "$sub" -z "$@" > "$TMP" 2>/dev/null || die 3 "falló: git $sub $*"
   FILES=""
   while IFS= read -r -d '' n; do
     case "$n" in *$'\n'*) NL_SKIPPED=$((NL_SKIPPED + 1)); continue ;; esac
@@ -128,8 +131,11 @@ pick_base() {
 
 WARN=""
 PR_OK=""
+PR_BASE=""
 ALCANCE=""
 FILES=""
+DIFF_U0=""
+STAGED_OK=""
 
 if [ "$MODE" = pr ]; then
   N="${TARGET#\#}"
@@ -138,12 +144,26 @@ if [ "$MODE" = pr ]; then
   FUENTE="pr:$N"
   DIFF="gh pr diff $N"
   HEAD_PR=$(gh pr view "$N" --json headRefOid -q .headRefOid 2>/dev/null)
+  BASE_REF=$(gh pr view "$N" --json baseRefName -q .baseRefName 2>/dev/null)
   read_status
-  if [ -n "$HEAD_PR" ] && [ "$(git rev-parse HEAD 2>/dev/null)" = "$HEAD_PR" ] && [ -z "$STAGED$UNSTAGED" ]; then
+  HEAD_NOW=$(git rev-parse HEAD 2>/dev/null)
+  if [ -n "$HEAD_PR" ] && [ -z "$STAGED$UNSTAGED" ] && [ "$HEAD_NOW" = "$HEAD_PR" ]; then
     PR_OK=si
-    [ -n "$UNTRACKED" ] && WARN="hay $(printf '%s' "$UNTRACKED" | grep -c .) ficheros sin trackear en el working tree; pueden afectar a los tests de la PR"
+    if [ -n "$BASE_REF" ] && git rev-parse --verify -q "origin/$BASE_REF^{commit}" >/dev/null; then
+      PR_BASE="origin/$BASE_REF"
+      DIFF_U0="git diff --unified=0 $PR_BASE...HEAD"
+    fi
+  elif [ -n "$HEAD_PR" ] && [ -z "$STAGED$UNSTAGED" ] && [ "$(git rev-parse -q --verify HEAD^2 2>/dev/null)" = "$HEAD_PR" ]; then
+    # checkout de GitHub Actions en pull_request: HEAD es el merge de la PR sobre su base.
+    PR_OK=si
+    PR_BASE="HEAD^1"
+    DIFF_U0="git diff --unified=0 HEAD^1 HEAD"
+    WARN="HEAD es el merge commit de la PR sobre su base (checkout de GitHub Actions)"
   else
     PR_OK=no
+  fi
+  if [ "$PR_OK" = si ] && [ -n "$UNTRACKED" ]; then
+    WARN="${WARN:+$WARN; }hay $(printf '%s' "$UNTRACKED" | grep -c .) ficheros sin trackear en el working tree; pueden afectar a los tests de la PR"
   fi
   UNTRACKED=""
 else
@@ -166,6 +186,9 @@ else
     FUENTE=staged
     FILES="$STAGED"
     DIFF="git diff --staged$PSTXT"
+    DIFF_U0="git diff --staged --unified=0$PSTXT"
+    BOTH=$(printf '%s' "$STAGED" | grep -Fxf <(printf '%s' "$UNSTAGED" | grep .) 2>/dev/null)
+    if [ -n "$BOTH" ]; then STAGED_OK=no; else STAGED_OK=si; fi
     OUTSIDE=$(printf '%s%s' "$UNSTAGED" "$UNTRACKED" | grep . | sort -u)
     [ -n "$OUTSIDE" ] && WARN="hay $(printf '%s\n' "$OUTSIDE" | grep -c .) ficheros con cambios sin stagear o sin trackear fuera de esta revisión"
     UNTRACKED=""
@@ -173,6 +196,7 @@ else
     FUENTE=unstaged
     FILES="$UNSTAGED"
     DIFF="git diff$PSTXT"
+    DIFF_U0="git diff --unified=0$PSTXT"
   else
     CUR=$(git symbolic-ref -q --short HEAD 2>/dev/null)
     OH=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null)
@@ -185,18 +209,21 @@ else
       FUENTE="rama:$BASE...HEAD"
       read_names diff --name-only "$BASE...HEAD" ${PS[@]+"${PS[@]}"}
       DIFF="git diff $BASE...HEAD$PSTXT"
+      DIFF_U0="git diff --unified=0 $BASE...HEAD$PSTXT"
     elif git rev-parse --verify -q HEAD~1 >/dev/null; then
       FUENTE=ultimo-commit
       read_names diff --name-only HEAD~1 HEAD ${PS[@]+"${PS[@]}"}
       DIFF="git diff HEAD~1$PSTXT"
+      DIFF_U0="git diff --unified=0 HEAD~1$PSTXT"
     elif git rev-parse --verify -q HEAD >/dev/null; then
       [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = true ] \
         && die 3 "clon superficial: no se puede saber qué cambió el último commit (git fetch --unshallow)"
       FUENTE=ultimo-commit
       read_names diff-tree --root --no-commit-id --name-only -r HEAD ${PS[@]+"${PS[@]}"}
       DIFF="git show HEAD$PSTXT"
+      DIFF_U0="git show --unified=0 HEAD$PSTXT"
     fi
-    [ -z "$FILES" ] && FUENTE=ninguna && DIFF=""
+    [ -z "$FILES" ] && FUENTE=ninguna && DIFF="" && DIFF_U0=""
   fi
 fi
 
@@ -220,11 +247,14 @@ count() { [ -z "$1" ] && echo 0 || printf '%s\n' "$1" | grep -c .; }
 [ -n "$ALCANCE" ] && echo "ALCANCE=$ALCANCE"
 echo "FUENTE=$FUENTE"
 echo "DIFF=$DIFF"
+echo "DIFF_U0=$DIFF_U0"
+[ -n "$STAGED_OK" ] && echo "STAGED_LIMPIO=$STAGED_OK"
 echo "TIPOS=$(types_for "$ALL")"
 echo "FICHEROS=$(count "$ALL")"
 echo "SIN_TRACKEAR=$(count "$UNTRACKED")"
 [ "$EXCLUDED" -gt 0 ] && echo "EXCLUIDOS=$EXCLUDED (sin trackear en .claude/, .idea/, .expo/, .vscode/ o .cursor/)"
 [ -n "$PR_OK" ] && echo "PR_EN_WORKTREE=$PR_OK"
+[ -n "$PR_BASE" ] && echo "PR_BASE=$PR_BASE"
 [ "$NL_SKIPPED" -gt 0 ] && WARN="${WARN:+$WARN; }$NL_SKIPPED ficheros con salto de línea en el nombre, no listados"
 [ -n "$WARN" ] && echo "AVISO=$WARN"
 echo "FICHEROS:"
