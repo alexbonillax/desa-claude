@@ -1,19 +1,19 @@
 ---
-description: Consultar o documentar en la wiki interna de Grupo Desa
+description: Consultar o documentar en la wiki interna de Grupo Desa. Usar cuando se pregunta qué dice la wiki sobre algo o se pide crear o actualizar una página; cada escritura va con vista previa y un sí explícito
 argument-hint: [qué consultar, documentar o actualizar]
-allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py token-status), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py workdir), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py GET:*)
+allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py token-status), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py workdir), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py GET:*), Read(/${CLAUDE_PLUGIN_ROOT}/references/ortografia.md)
 ---
 
 # Wiki — Sistema de documentación interna
 
-Eres el asistente de la wiki interna de Grupo Desa. Puedes consultar documentación existente y, si el usuario tiene permisos, crear o actualizar documentos vía API REST.
+Consulta la wiki interna de Grupo Desa y, si el usuario tiene permisos, crea o actualiza documentos con la API REST. Una escritura publica al momento para todos los que ven la página, así que ninguna sale sin vista previa y un sí del usuario.
 
 ## Modo de operación
 
 Analiza lo que pide el usuario con $ARGUMENTS:
 
-- **Consulta** (buscar, leer, explorar, "qué dice la wiki sobre..."): Usa solo endpoints GET. No intentes escribir.
-- **Documentar** (crear, actualizar, documentar, escribir): Usa endpoints GET para explorar y leer, y POST para crear/actualizar.
+- **Consulta** (buscar, leer, explorar, «qué dice la wiki sobre…»): solo lecturas.
+- **Documentar** (crear, actualizar, documentar, escribir): lecturas para explorar y POST para crear o actualizar.
 
 Gestión de errores de la API:
 
@@ -42,7 +42,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py token-status
 
   Si `token-status` dice `OK DESA_API_TOKEN`, el token sale de esa variable de entorno, que tiene prioridad: ante un 401, pedir al usuario que la actualice o la quite, porque `set-token` no la cambia.
 
-**No continúes sin token válido.** El mismo token sirve para `/desa:translations`.
+Sin token válido no se sigue. El mismo token sirve para `/desa:translations`.
 
 ## API
 
@@ -68,7 +68,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py token-status
 | POST | `/documents/{id}` | Actualizar documento |
 | DELETE | `/documents/{id}` | Soft delete |
 
-Las respuestas POST devuelven el documento completo. Extraer el campo `id` del body para usarlo en la verificación posterior (`GET /documents/{id}?include=teams,roles`, paso 6 del flujo de documentar).
+Las respuestas POST devuelven el documento completo. Extraer el campo `id` del body para usarlo en la verificación posterior (`GET /documents/{id}?include=teams,roles`, paso 8 del flujo de documentar).
 
 **DELETE requiere confirmación explícita**: antes de ejecutar cualquier DELETE, mostrar al usuario el título del documento y pedir confirmación. Aunque es soft delete (recuperable por administración), el usuario debe aprobarlo explícitamente.
 
@@ -123,50 +123,9 @@ Ejemplo al crear un documento. `TEAMS_DEL_PADRE` y `ROLES_DEL_PADRE` son los IDs
 - Enlaces entre documentos: `[título visible](document:{id})`
 - No usar emojis
 
-## Ortografía — OBLIGATORIO
+## Ortografía
 
-Todo el contenido debe estar en **español con acentos correctos**. Esto es un requisito bloqueante: no envíes ningún POST sin haber verificado la ortografía.
-
-Palabras que frecuentemente se escriben sin tilde por error:
-
-| Incorrecto | Correcto |
-|-----------|----------|
-| topologia | topología |
-| fisico/a | físico/a |
-| tuneles | túneles |
-| funcion | función |
-| publica | pública |
-| logica | lógica |
-| parametro | parámetro |
-| configuracion | configuración |
-| informacion | información |
-| gestion | gestión |
-| autenticacion | autenticación |
-| conexion | conexión |
-| operacion | operación |
-| direccion | dirección |
-| descripcion | descripción |
-| sincronizacion | sincronización |
-| documentacion | documentación |
-| numero | número |
-| codigo | código |
-| metodo | método |
-| unico/a | único/a |
-| tecnologia | tecnología |
-| logistico/a | logístico/a |
-| analisis | análisis |
-| politica | política |
-| automatico/a | automático/a |
-| vehiculo | vehículo |
-| catalogo | catálogo |
-| periodo | período |
-| almacen | almacén |
-| tambien | también |
-| asi | así |
-| mas (adverbio) | más |
-| actua | actúa |
-
-**Antes de cada POST** (crear o actualizar), revisa todo el JSON que vas a enviar y corrige cualquier palabra sin tilde. Presta especial atención a `title`, `description` y `content`. Si generas contenido largo, revísalo en bloques.
+Antes de cada POST, revisar el texto completo de `title`, `description` y `content` con `${CLAUDE_PLUGIN_ROOT}/references/ortografia.md`, por bloques si es largo. La tabla recoge los errores más frecuentes y las formas que dependen del contexto (*publica*, *numero*), pero se revisa todo el texto: la wiki llegó a publicar páginas enteras sin tildes.
 
 ## Convenciones de contenido
 
@@ -177,6 +136,8 @@ Palabras que frecuentemente se escriben sin tilde por error:
 - Contenido técnico: tablas markdown, bloques de código con lenguaje
 
 ## Flujo de trabajo para consultas
+
+Si la sesión tiene el conector de la wiki (herramientas `search_wiki`, `get_wiki_document`, `get_wiki_structure` y `list_wiki_children`), las consultas pueden ir por él; si no está o falla, por la API REST. La lectura previa a una actualización va siempre por REST, porque necesita `include=teams,roles`.
 
 1. **Buscar**: `GET /documents?filter[search]=texto&perPage=100` — si la consulta es sobre un concepto, sistema o proceso concreto, empezar aquí
 2. **Si la búsqueda no es fructífera o la consulta es exploratoria**: `GET /documents/root?include=documents` para ver la estructura general
@@ -190,34 +151,23 @@ Palabras que frecuentemente se escriben sin tilde por error:
 2. **Explorar**: `GET /documents/root?include=documents` para entender la estructura y determinar dónde debe vivir el nuevo contenido
 3. **Navegar**: `GET /documents?filter[document]={id}&include=documents&perPage=100` para localizar el nodo padre correcto
 4. **Leer**: `GET /documents/{id}` — obligatorio antes de cualquier escritura. Al actualizar: `GET /documents/{id}?include=teams,roles`, para preservar el contenido y la visibilidad existentes. Al crear: leer el padre con `?include=teams,roles` para entender el contexto y heredar su visibilidad. En los dos casos, si `roles` viene vacío (la página solo la ve super-admin, probablemente porque se creó con una versión anterior de esta skill), o si `fields.is_public` es `false` y `teams` viene vacío (sus equipos se han borrado), no copiar esa visibilidad en silencio: avisar al usuario y preguntar qué equipos y roles poner. Quien escribe siempre es super-admin, así que no lo notaría
-5. **Revisar ortografía**: Antes de enviar, repasa title, description y content buscando palabras sin tilde. Consulta la tabla de la sección "Ortografía" y corrige. Este paso es obligatorio
-
-**Antes de cualquier POST** (crear o actualizar), enseñar al usuario una vista previa y esperar un sí explícito, igual que con el DELETE. Un POST publica al momento para quien tenga acceso y, al actualizar, sustituye la página entera. La vista previa incluye:
-
-- acción (crear o actualizar), padre (id y título), título, `description`, `searchable_tags`, `is_published` y visibilidad, con los nombres de equipos y roles;
-- al crear, el contenido completo. Al actualizar, el diff real frente a la API, no frente a una copia hecha a mano:
-  1. guardar el contenido actual dos veces, con `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py GET /documents/{id} --param include=teams,roles --save-content actual.md` y lo mismo con `--save-content nuevo.md` (quedan en el directorio de `workdir`);
-  2. aplicar los cambios a `nuevo.md` con Edit;
-  3. enseñar `diff -u {workdir}/actual.md {workdir}/nuevo.md`;
-  4. enviar después el POST con `--content-from nuevo.md`, para que los párrafos que no se tocan viajen tal cual;
-- las fuentes: de qué ficheros del código sale cada regla documentada (ver «Importante»).
-
-Justo antes del POST de actualización, volver a leer el documento y comparar `fields.updated_at` con el del paso 4. Si ha cambiado, alguien lo ha editado mientras tanto: no enviar, enseñar qué ha cambiado, rehacer los cambios sobre la versión nueva y volver a enseñar la vista previa y esperar otro sí antes del POST. El backend no tiene bloqueo optimista, así que un POST con lo leído antes machacaría esa edición.
-
-**Si creas** un documento nuevo:
-- Identificar el `document_id` del padre en el paso 3
-- `POST /documents/new` con todos los campos, incluyendo `document_id`, y con `teams` y `roles` del padre
-- Si es documentación de lógica de negocio, seguir también el flujo de **Referencias cruzadas** (sección «Estructura de la wiki») para enlazarlo desde el eje de negocio y actualizar el índice de la aplicación
-
-**Si actualizas** un documento existente:
-- Enviar TODOS los campos con el contenido completo. Los campos omitidos o con `null` borran el contenido
-- `POST /documents/{id}` con el body completo leído en el paso 4 más los cambios aplicados, incluidos `document_id`, `is_published`, `teams` y `roles` tal como estaban, y el contenido con `--content-from nuevo.md`
-
-6. **Verificar**: `GET /documents/{id}?include=teams,roles` para confirmar que el resultado es el esperado: al actualizar, que `teams`, `roles` y `fields.is_public` no han cambiado; al crear, que `roles` no ha quedado vacío salvo que el usuario lo pidiera
+5. **Redactar y revisar la ortografía** del texto completo (sección «Ortografía»), con lo visto en la sesión (sección «Fuentes»).
+6. **Vista previa y un sí explícito**, igual que con el DELETE: un POST publica al momento para quien tenga acceso y, al actualizar, sustituye la página entera. La vista previa incluye:
+    - acción (crear o actualizar), padre (id y título), título, `description`, `searchable_tags`, `is_published` y visibilidad, con los nombres de equipos y roles;
+    - al crear, el contenido completo. Al actualizar, el diff real frente a la API, no frente a una copia hecha a mano:
+        1. guardar el contenido actual dos veces, con `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py GET /documents/{id} --param include=teams,roles --save-content actual.md` y lo mismo con `--save-content nuevo.md` (quedan en el directorio de `workdir`);
+        2. aplicar los cambios a `nuevo.md` con Edit;
+        3. enseñar `diff -u {workdir}/actual.md {workdir}/nuevo.md`;
+    - las fuentes de cada regla documentada, con `fichero:línea`, y lo que queda fuera por no haberse podido confirmar.
+7. **Enviar el POST** tras el sí:
+    - **Al crear**: `POST /documents/new` con todos los campos, `document_id` del padre (paso 3) incluido, y con `teams` y `roles` del padre. Si es documentación de lógica de negocio, seguir también «Referencias cruzadas» para enlazarla desde el eje de negocio y actualizar el índice de la aplicación.
+    - **Al actualizar**: el POST sustituye el documento entero, y un campo omitido o `null` borra su contenido. Justo antes, volver a leer el documento y comparar `fields.updated_at` con el del paso 4: si ha cambiado, alguien lo ha editado mientras tanto (el backend no tiene bloqueo optimista, y el POST machacaría esa edición). En ese caso no enviar: enseñar qué ha cambiado, rehacer los cambios sobre la versión nueva y volver al paso 6. Si no ha cambiado, `POST /documents/{id}` con el body completo leído en el paso 4 más los cambios, con `document_id`, `is_published`, `teams` y `roles` tal como estaban, y el contenido con `--content-from nuevo.md`, para que los párrafos que no se tocan viajen tal cual.
+8. **Verificar**: `GET /documents/{id}?include=teams,roles` para confirmar que el resultado es el esperado: al actualizar, que `teams`, `roles` y `fields.is_public` no han cambiado; al crear, que `roles` no ha quedado vacío salvo que el usuario lo pidiera.
+9. **Resumen al usuario**: qué se ha creado o cambiado (id y título), las fuentes con `fichero:línea` y lo que ha quedado fuera.
 
 ## Estructura de la wiki
 
-La wiki tiene dos ejes principales:
+La wiki tiene dos ejes principales. Los ids de este apartado se anotaron en febrero de 2026: antes de usar uno, comprobar que el título del documento coincide.
 
 ### Eje de negocio (cómo funciona la empresa)
 
@@ -252,7 +202,7 @@ La documentación de lógica de negocio vive bajo la **aplicación correspondien
 
 1. **Identificar** en qué aplicación reside la lógica (backend, frontend, Desa Connect, etc.)
 2. **Crear** la página bajo la sección Lógica de Negocio de esa aplicación, con lenguaje no técnico, sin código
-3. **Enlazar** desde la página del flujo de negocio correspondiente (Ventas, Centro Logístico, etc.). Es una actualización: seguir «Si actualizas» y conservar su visibilidad
+3. **Enlazar** desde la página del flujo de negocio correspondiente (Ventas, Centro Logístico, etc.). Es una actualización: seguir el paso 7 («Al actualizar») y conservar su visibilidad
 4. **Actualizar** la página índice de Lógica de Negocio de la aplicación con el nuevo enlace, también como actualización
 
 **Ejemplo**: La lógica de pedidos (id: 34) está bajo Desaverse Backend > Lógica de Negocio (id: 33), y Ventas (id: 11) la enlaza como referencia cruzada.
@@ -271,10 +221,6 @@ Las páginas de Lógica de Negocio están orientadas a perfiles no técnicos (di
 - Usar ejemplos numéricos concretos cuando ayuden a entender
 - Estructura: descripción breve → separador → secciones por regla
 
-## Regla de oro al actualizar
+## Fuentes
 
-`POST /documents/{id}` reemplaza el documento completo. Un campo omitido o `null` borra su contenido. **Siempre leer antes de actualizar** (paso 4 del flujo de documentar) y enviar el body completo con los cambios aplicados encima, visibilidad incluida.
-
-## Importante
-
-Cuando documentes, **lee el código fuente** del proyecto relevante para extraer información real. No inventes. Basa la documentación en código existente, configuraciones, estructura de directorios y patrones del código.
+Documentar solo lo que se ha visto en esta sesión: el código fuente del proyecto, su configuración y estructura, o lo que diga el usuario. Lo que no se ha podido confirmar se pregunta o se deja fuera, y se dice qué ha quedado fuera. Las referencias `fichero:línea` van en la vista previa y en el resumen, no en las páginas de lógica de negocio, que leen perfiles no técnicos.

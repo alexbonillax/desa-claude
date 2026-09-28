@@ -1,14 +1,18 @@
 ---
-description: Planificar una tarea con exploración, review-awareness y 3 iteraciones de mejora antes de implementar
+description: Planificar una tarea antes de implementarla. Usar cuando la tarea ya está acotada (p. ej. tras /desa:triage) y hay que decidir qué tocar. Explora el código, inventaría lo reutilizable, aplica los criterios de /desa:review y termina con un plan que el usuario aprueba en plan mode
 argument-hint: [descripción de la tarea]
 allowed-tools: Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/diff-context.sh:*), Read, Grep, Glob, Agent
 ---
 
 # Plan — Planificación con estándares Grupo Desa
 
-Convierte un prompt de tarea en un plan ejecutable y pulido, aplicando los criterios de `/desa:review` *antes* de implementar y priorizando la reutilización de código existente.
+Convierte una tarea en un plan ejecutable que el usuario aprueba antes de implementar, aplicando los criterios de `/desa:review` *antes* de escribir código y priorizando la reutilización de lo que ya existe.
 
 Si `$ARGUMENTS` está vacío, pedir al usuario la descripción de la tarea y terminar.
+
+**Plan mode.** El plan se aprueba con `ExitPlanMode`, y el fichero del plan solo tiene ruta asignada en plan mode. Si el system reminder no indica plan mode, llamar a `EnterPlanMode` antes del Paso 3. Si no está disponible o el usuario prefiere no usarlo, entregar el plan en el chat sin escribir ficheros, y terminar ahí.
+
+**Si viene de `/desa:triage`**, lo que el triage dejó cerrado no se vuelve a explorar: su comprobación descalificante ya está respondida y lo descartado sigue descartado. Llevar al Context del plan su «Medido» y su regla de paro. Si la petición es un síntoma o una decisión y no hay triage previo, sugerir `/desa:triage` en una línea y seguir.
 
 ## Paso 1: Detectar tipo de proyecto
 
@@ -25,15 +29,8 @@ El tipo sale del repositorio y de la tarea, no del diff: al planificar, los camb
 
 ## Paso 2: Cargar contexto fijo
 
-Leer en paralelo:
-
-- `CLAUDE.md` del proyecto (si existe).
-- `~/.claude/projects/{project-path}/memory/MEMORY.md` (si existe) — aplicar cualquier feedback o convención relevante.
-- `${CLAUDE_PLUGIN_ROOT}/commands/review.md` — la sección «Criterios compartidos» siempre, más la del tipo detectado, por su encabezado:
-  - backend → «Criterios backend (Laravel/PHP)»
-  - frontend → «Criterios frontend (React/JS)»
-  - mobile → «Criterios mobile (React Native)», más #65, que está en la sección de frontend
-  - websites → «Criterios websites (Next.js single-app)»
+- `CLAUDE.md` del proyecto e índice de memoria: si ya están en contexto, aplicarlos sin releerlos. Si no, porque la sesión se abrió en otro directorio o la memoria automática está desactivada, leer el `CLAUDE.md` del proyecto y `~/.claude/projects/{project-path}/memory/MEMORY.md`. Leer además las notas de memoria cuyo título sea del dominio de la tarea.
+- Los criterios de `/desa:review` del tipo detectado, en paralelo desde `${CLAUDE_PLUGIN_ROOT}/references/`: `criterios-compartidos.md` siempre, más `criterios-backend.md`, `criterios-frontend.md`, `criterios-mobile.md` o `criterios-websites.md`.
 
 ## Paso 3: Explorar (paralelo, adaptativo)
 
@@ -48,35 +45,25 @@ Decidir número de Explore agents según `$ARGUMENTS`:
 
 Cada agent debe devolver **rutas exactas con números de línea**, no descripciones vagas.
 
-## Paso 4: Draft inicial del plan
+## Paso 4: Borrador del plan
 
-Producir internamente un borrador que contenga:
+Redactar un borrador, que todavía no se enseña al usuario, con:
 
 - **Reuse inventory**: lista de funciones/hooks/componentes/servicios existentes que se van a reusar, con `file_path:line`.
   - Si la lista está vacía en una tarea no trivial, reintentar la búsqueda antes de seguir. La causa #1 de mala planificación es reinventar lo que ya existe.
 - **Archivos a modificar**: rutas exactas.
 - **Archivos a crear**: solo si son imprescindibles; justificar por qué no se puede reusar algo existente.
 - **Cambios clave por archivo**: 1–3 líneas por archivo, sin pseudocódigo extenso.
+- **Supuestos sin comprobar**: lo que el plan da por cierto sin haberlo visto en el código (p. ej. «el Service ya filtra por rol»), y qué lo confirmaría.
 
-## Paso 5: 3 iteraciones de mejora (focos predefinidos)
+Al redactar cada cambio, tener en cuenta:
 
-Cada iteración revisa el borrador completo con un foco distinto. Ajustar el plan tras cada pasada.
+- **Caminos infelices** que apliquen a ese cambio: estado vacío o nulo, errores esperados, permisos y roles, concurrencia, datos existentes que puedan romper al aplicarlo. En backend, además, entidades con soft-delete y transacciones completas con try/catch. En el plan se anotan solo los que apliquen.
+- **Simplificación**: nada de abstracciones que no hagan falta, wrappers triviales, configurabilidad sobrante, soluciones «clever» ni pasos «para el futuro» (#9). Si se puede borrar código en vez de añadir, o reusar más de lo inventariado, hacerlo.
 
-### Iteración 1 — Edge cases y correctness
+## Paso 5: Comprobar contra los criterios de review
 
-Preguntar explícitamente para cada cambio:
-
-- ¿Qué pasa con estado vacío / nulo?
-- ¿Errores esperados y su manejo?
-- ¿Permisos y roles afectados?
-- ¿Concurrencia / race conditions?
-- ¿Entidades con soft-delete involucradas?
-- ¿Transacciones completas con try/catch?
-- ¿Datos existentes que puedan romper al aplicar el cambio?
-
-### Iteración 2 — Compliance con review.md
-
-Para cada archivo planificado, comprobar explícitamente las reglas relevantes cargadas en Paso 2. Ejemplos típicos según tipo:
+Para cada archivo planificado, comprobar las reglas cargadas en el Paso 2 que le apliquen. Ejemplos típicos según tipo:
 
 **Backend**: whitelist de roles (#13, #33), `entityQuery()` al inicio de `query()` (#27), transacción + try/catch (#22), `event()`/`broadcast()` después de `commit()` (#23), `withTrashed()` en morphTo/belongsTo a soft-deletable (#30), Resource con `addEntityRelations` (#20), controller ultra-thin (#26), audit trail en save (#28), guardia de estado en save/delete (#29), convenciones HTTP (#31), naming de Events (#32).
 
@@ -86,17 +73,7 @@ Para cada archivo planificado, comprobar explícitamente las reglas relevantes c
 
 **Websites**: `LocaleLink` en Client Components y `localePath()` en Server Components (#98), imports directos de MUI (#99), Server Components por defecto (#100), desestructurar `.data` y comprobar `null` (#101), `fetch` solo vía `api.js` (#102), ISR con las constantes `REVALIDATE` (#103), lógica testable fuera de los Server Components async (#104), `i18next.t()` nunca a nivel módulo (#97).
 
-Si el borrador viola alguna regla, corregirlo antes de la siguiente pasada.
-
-### Iteración 3 — Simplificación
-
-Preguntas obligatorias:
-
-- ¿Hay alguna abstracción nueva propuesta que realmente no hace falta?
-- ¿Se puede borrar código en vez de añadir?
-- ¿Se puede reusar *más* de lo inventariado en el Paso 4?
-- ¿Algún paso del plan es especulativo / for-future-use? Eliminarlo.
-- ¿Sobra configurabilidad, wrappers triviales o soluciones "clever"? (#9)
+Si el borrador viola alguna, corregirlo.
 
 ## Paso 6: Escribir plan file
 
@@ -120,6 +97,9 @@ Escribir el plan consolidado en la ruta que el sistema de plan mode haya asignad
 ## Cambios clave
 {descripción del approach, sin pseudocódigo extenso}
 
+## Supuestos sin comprobar
+- {supuesto} — qué lo confirmaría
+
 ## Verificación
 - Cómo probar end-to-end (comandos, rutas UI, tests a correr)
 - Edge cases específicos a validar manualmente
@@ -132,11 +112,9 @@ Lista de los #N de review.md más relevantes que el plan ya respeta (trazabilida
 
 Llamar a `ExitPlanMode` para que el usuario apruebe antes de implementar.
 
-## Reglas estrictas
+## Límites
 
-- **Nunca implementar** en la misma invocación. El comando termina con ExitPlanMode.
+- **Nunca implementar** en la misma invocación. El valor del plan está en que el usuario lo apruebe en `ExitPlanMode` antes de tocar código.
 - **Nunca proponer código nuevo** sin antes haber hecho la búsqueda de reuso (Paso 3) y listado Reuse inventory (Paso 4).
-- **Nunca escribir pseudocódigo largo** en el plan; referenciar archivos y líneas.
-- **Siempre** referenciar los `#N` de `review.md` que aplican, para trazabilidad.
-- **Nunca** duplicar criterios de `review.md` en el plan file — solo listar los `#N`.
-- Si `$ARGUMENTS` está vacío, pedir la descripción de la tarea y terminar sin planificar.
+- **Nunca escribir pseudocódigo largo** en el plan: referenciar archivos y líneas, para que se pueda revisar de un vistazo.
+- **Siempre** referenciar los `#N` de review que aplican, sin copiar el texto de los criterios.

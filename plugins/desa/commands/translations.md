@@ -1,12 +1,12 @@
 ---
-description: Gestionar traducciones (terms) vía API y sincronizar archivos locales
+description: Gestionar las traducciones (terms) de Grupo Desa en la API y sincronizar los ficheros de idioma locales. Usar cuando hay que crear, cambiar, buscar o borrar un texto traducible, o sincronizar los ficheros con la API, y cuando el CLAUDE.md del proyecto manda pasar las traducciones por aquí
 argument-hint: [crear term, sincronizar, buscar texto]
-allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py token-status), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py workdir), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py project), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py locales), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py find:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py search:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py sync)
+allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py token-status), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py workdir), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py project), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py locales), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py find:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py search:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py sync), Read(/${CLAUDE_PLUGIN_ROOT}/references/ortografia.md)
 ---
 
 # Translations — Gestión de traducciones de Grupo Desa
 
-Gestionas las traducciones (terms) del proyecto vía la API de Terms: crear, actualizar, eliminar y buscar terms, y sincronizar los ficheros locales de i18n con la API, que es la fuente de verdad.
+Gestiona las traducciones (terms) del proyecto con la API de Terms: crear, actualizar, eliminar y buscar terms, y sincronizar los ficheros locales de i18n con la API, que es la fuente de verdad.
 
 Todo pasa por `terms.py`, que lee el token por su cuenta, pagina, aborta sin escribir ante cualquier error de la API y escribe los ficheros con el orden y el formato de los que ya hay en los proyectos (regenerar los actuales da bytes idénticos). No llamar a la API con curl ni generar los ficheros a mano. Sin `--apply`, ningún subcomando escribe nada: enseña lo que haría.
 
@@ -39,7 +39,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py token-status
 
 Si `token-status` dice `OK DESA_API_TOKEN`, el token sale de esa variable de entorno, que tiene prioridad: ante un 401, pedir al usuario que la actualice o la quite, porque `set-token` no la cambia.
 
-**No continúes sin token válido.** El mismo token sirve para `/desa:wiki`.
+Sin token válido no se sigue. El mismo token sirve para `/desa:wiki`.
 
 ## Modo de operación
 
@@ -75,7 +75,7 @@ Imprime una tabla con una columna por idioma de `/locales` (`—` donde no hay t
 1. Namespace: en frontend, siempre `app`; en backend, deducirlo del contexto o preguntar, con `app` por defecto.
 2. Comprobar si existe: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py find --ns {ns} --code {code}` (imprime el term o `NO_EXISTE`). Antes de crear uno nuevo, buscar también por el texto en español (`search`): si ya hay un `global.*` con el mismo valor y significado, mencionarlo en el resultado, sin bloquear la creación.
 3. Escribir los valores con Write en un fichero JSON (`{"es": "…", "fr": "…"}`), solo con idiomas de `/locales`, en el directorio que da `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py workdir`. Por defecto, los idiomas que ha dado el usuario; `upsert` avisa con `SIN_TRADUCCION` de los que faltan. Si el `CLAUDE.md` del proyecto pide traducir a todos los idiomas de `/locales`, proponer los que falten: son traducciones del modelo y requieren la confirmación del paso 6. Nunca cadenas vacías. Variantes: `es` es español de España y `pt`, portugués de Portugal.
-4. Revisar la ortografía de `es` (sección «Ortografía»).
+4. Revisar la ortografía de `es` (sección «Ortografía»). Si se corrige el texto que ha dado el usuario, cuenta para la confirmación del paso 6.
 5. Dry-run: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py upsert --ns {ns} --code {code} --values {fichero}`. Enseña, por idioma, el valor actual, el nuevo y si es nuevo o sobrescribe, y en `LOCAL` los ficheros que tocaría. Con un namespace propio de Laravel se niega; con uno que no existe en local, lo deja solo en la API y lo avisa.
 6. **Pedir confirmación** antes de `--apply` si se sobrescribe algún valor, si hay traducciones propuestas por el modelo o si se ha corregido la ortografía del texto del usuario. En ese caso, enseñar la tabla del dry-run y decir de dónde sale cada valor. Si el usuario ha dado todos los valores de un term nuevo, basta con enseñar el resultado.
 7. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py upsert --ns {ns} --code {code} --values {fichero} --apply`. Envía el objeto completo (lo actual fusionado con lo nuevo) y actualiza los ficheros locales de cada idioma con valor. No se sabe si la API fusiona o reemplaza `value`, así que no se promete que omitir un idioma lo borre.
@@ -126,52 +126,11 @@ Requiere estar en un proyecto. La API es la fuente de verdad: el contenido de ca
 - **Frontend**: JSON plano con claves en dot-notation ordenadas, 2 espacios de indentación, UTF-8 sin escapar y salto de línea final.
 - **Backend**: `<?php\n\nreturn array(...);` plano, con claves ordenadas, comillas dobles, `=>` alineados con la clave más larga y salto de línea final. Claves y valores se escapan en este orden: `\` → `\\`, `"` → `\"`, `$` → `\$`. Dentro de comillas dobles PHP interpola `$var` y evalúa `{${expr}}`, así que un valor sin escapar tumba el fichero entero (Laravel convierte el warning en excepción) o ejecuta código al cargarlo, y los valores los escribe cualquiera con acceso a la API.
 
-## Ortografía — OBLIGATORIO
+## Ortografía
 
-Todo el contenido en español debe tener **acentos correctos**. Esto es un requisito bloqueante: no envíes ningún POST sin haber verificado la ortografía del campo `value.es`.
+Antes de cada escritura, revisar el `value.es` completo con `${CLAUDE_PLUGIN_ROOT}/references/ortografia.md`. La tabla recoge los errores más frecuentes y las formas que dependen del contexto (*publica*, *numero*), pero se revisa todo el texto. Solo se aplica a `es`.
 
-Palabras que frecuentemente se escriben sin tilde por error:
-
-| Incorrecto | Correcto |
-|-----------|----------|
-| topologia | topología |
-| fisico/a | físico/a |
-| tuneles | túneles |
-| funcion | función |
-| publica | pública |
-| logica | lógica |
-| parametro | parámetro |
-| configuracion | configuración |
-| informacion | información |
-| gestion | gestión |
-| autenticacion | autenticación |
-| conexion | conexión |
-| operacion | operación |
-| direccion | dirección |
-| descripcion | descripción |
-| sincronizacion | sincronización |
-| documentacion | documentación |
-| numero | número |
-| codigo | código |
-| metodo | método |
-| unico/a | único/a |
-| tecnologia | tecnología |
-| logistico/a | logístico/a |
-| analisis | análisis |
-| politica | política |
-| automatico/a | automático/a |
-| vehiculo | vehículo |
-| catalogo | catálogo |
-| periodo | período |
-| almacen | almacén |
-| tambien | también |
-| asi | así |
-| mas (adverbio) | más |
-| actua | actúa |
-
-**Antes de cada POST**, revisa `value.es` y corrige cualquier palabra sin tilde. Solo aplicar al locale `es`.
-
-## Reglas importantes
+## Límites
 
 - **La API es la fuente de verdad**, y los ficheros locales se escriben solo con `terms.py`.
 - **Buscar antes de crear**, siempre con code y namespace.

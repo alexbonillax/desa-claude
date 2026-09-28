@@ -5,6 +5,26 @@ All notable changes to the `desa` plugin will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.15.0] — 2026-09-28
+
+Bloque 5 de la auditoría (`docs/auditorias/2026-09-28-skills-opus-5-5.md`): contexto y estilo para Opus 5.5.
+
+### Changed
+
+- **Los criterios de `/desa:review` salen a `plugins/desa/references/`** — `criterios-compartidos.md` (#1-9), `criterios-backend.md` (#10-33), `criterios-frontend.md` (#34-81), `criterios-mobile.md` (#65 y #82-85) y `criterios-websites.md` (#86-106), cada criterio una vez y con su texto. La skill carga solo los del tipo que toca el diff, y `/desa:plan` lee los mismos ficheros en vez de una copia. Revierte la decisión de la 1.8.0 de no crear subcarpetas: los criterios eran el 57 % de review.md, y tras una compactación, que solo conserva el principio de cada skill, se perdían el formato del informe y las reglas. Los `#N` no se renumeran nunca; los nuevos van al final de su fichero (el siguiente es #107) y los retirados se marcan. Los gemelos de websites llevan `(= #N)`, y mobile declara que no hereda los criterios de frontend.
+- **review.md empieza por el flujo, la severidad y los límites**, y dice que se relea el fichero si tras compactar falta algo. Las secciones de reglas se llaman «Límites» en todas las skills.
+- **Umbral de confianza con evidencia** — Una incidencia solo se reporta con su evidencia (la línea del diff y, en los criterios de patrón, el fichero de referencia leído) y confianza >= 75. Las descartadas se cuentan en el Resumen en vez de omitirse en silencio, y `--verbose` las lista con su evidencia.
+- **Linter frente a criterios** — La regla de no reportar lo que ve un linter solo cubre lo que no tiene criterio propio: los numerados, como #34 o #86, se aplican siempre.
+- **Diffs de más de 20 ficheros** — Se revisan todos, con aviso de que por directorio sale más detalle, y lo que no se revise va en «sin revisar».
+- **CLAUDE.md y memoria, si no están ya en contexto** — review, plan y triage los aplican sin releerlos si Claude Code ya los cargó, y los leen si no. review lee además los `CLAUDE.md` de los subdirectorios del diff, que Claude Code no carga solo porque el diff llega por Bash.
+- **Avisos condensados** — Los avisos largos de «Paso 6 incondicional» y del Paso 7 quedan en una frase cada uno, con su porqué y su antecedente (la validación de la 1.8.0).
+- **`/desa:plan`** — description que dice cuándo usarla; si no hay plan mode, llama a `EnterPlanMode` o entrega el plan en el chat; lo que dejó cerrado `/desa:triage` no se vuelve a explorar; las tres iteraciones de revisión pasan a principios del borrador (caminos infelices por stack y simplificación); el plan lleva «Supuestos sin comprobar».
+- **`/desa:triage`** — description que la excluye de las implementaciones de alcance claro; formato A de tres líneas; la salida completa abre con `**Veredicto**`, compara el presupuesto declarado con el gastado y añade la columna `alcance` a «Medido»; encargo explícito para cada agente (tipo `Explore`, que no puede lanzar los suyos, y el adversario sin el razonamiento que refuta); qué hacer en nivel 3 cuando nadie puede responder; aviso de que `EXPLAIN ANALYZE` ejecuta la sentencia; tiempo de servidor con `time_starttransfer − time_pretransfer` y `http_code` en cada muestra; minutos solo si se han medido.
+- **`/desa:update`** — Anota la versión antes y después con `claude plugin list --json`, resume el CHANGELOG de las versiones nuevas y distingue «actualizado de X a Y» de «ya tenías la última»; si hay commits sin subida de versión, lo dice y ofrece el procedimiento del README. Recuerda `/reload-plugins`. No da por hecho nada que los comandos no muestren.
+- **`/desa:wiki`** — Sin role-play; flujo de documentar numerado de principio a fin, con la vista previa, el POST y el resumen como pasos; sección «Fuentes»: solo se documenta lo visto en la sesión, lo no confirmado se pregunta o queda fuera, y las referencias `fichero:línea` van en la vista previa y el resumen, nunca en las páginas de negocio; las consultas pueden ir por el conector MCP de la wiki si la sesión lo tiene; los ids de la estructura llevan la fecha en que se anotaron.
+- **Ortografía en un solo fichero** — `plugins/desa/references/ortografia.md` sustituye las dos tablas de wiki y translations. Quita de «siempre con tilde» las formas que también son verbo (*publica*, *numero*, *catalogo*, *vehiculo*) y *mas*, que pasan a «según el caso», y deja *período* como estilo de la casa. La comprobación antes de cada escritura se mantiene.
+- **descriptions** — Las de review, plan, triage, wiki y translations dicen cuándo usarlas. review sigue siendo invocable por el modelo (hay reglas `allow Skill(desa:review)` en tres repos), y su description avisa de que puede escribir y stagear tests.
+
 ## [1.14.0] — 2026-09-28
 
 ### Security

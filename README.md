@@ -62,6 +62,11 @@ Reporta incidencias agrupadas por severidad (Crítico / Importante / Menor) con 
 - Si hace falta preaprobar algo, que sea el comando exacto, p. ej. `Bash(claude plugin marketplace update desa)`. Excepciones:
   - `Bash(gh pr diff:*)` en `/desa:review`, porque Claude Code no aprueba solo ningún comando `gh` y `gh pr diff` no tiene flags que escriban ficheros.
   - Los scripts de solo lectura del propio plugin, p. ej. `Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/diff-context.sh:*)`. Claude Code sustituye `${CLAUDE_PLUGIN_ROOT}` también dentro de `allowed-tools`.
+  - La lectura de los ficheros de `references/` que usa cada skill, como `Read(/${CLAUDE_PLUGIN_ROOT}/references/ortografia.md)`: la doble barra que queda al sustituir la variable es la forma de las reglas para una ruta absoluta.
   - Las lecturas de los clientes de la API: `desa_api.py token-status`, `workdir` y `GET:*` (el cliente solo admite las rutas de la wiki y de terms), y los subcomandos de `terms.py` que no escriben ni ejecutan PHP (`project`, `locales`, `find`, `search` y `sync` sin `--apply`, este como orden exacta). Nunca un prefijo que admita `POST`, `DELETE`, `--apply` o `--allow-php`. Un GET no significa «sin efectos» en cualquier API: por eso el cliente limita las rutas.
+
+## Mantenimiento: criterios de review
+
+Los criterios de `/desa:review`, que también usa `/desa:plan`, están en `plugins/desa/references/criterios-{compartidos,backend,frontend,mobile,websites}.md`, y la skill carga solo los del tipo de proyecto que toca el diff. Los números `#N` no se renumeran nunca, porque los citan informes, planes y PRs de otros repos: un criterio nuevo va al final de su fichero con el siguiente número libre, y uno retirado se queda marcado como «(retirado)». La tabla de ortografía de `/desa:wiki` y `/desa:translations` está en `plugins/desa/references/ortografia.md`.
 
 Los scripts de `plugins/desa/scripts/` tienen sus pruebas en `tests/`, que no se distribuye con el plugin: `bash tests/diff-context.test.sh`, `bash tests/test-context.test.sh` y `python3 -m unittest discover -s tests`.
