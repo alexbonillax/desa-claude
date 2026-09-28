@@ -5,6 +5,20 @@ All notable changes to the `desa` plugin will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.0] — 2026-09-28
+
+Bloque 6 de la auditoría (`docs/auditorias/2026-09-28-skills-opus-5-5.md`): evals y documentación.
+
+### Added
+
+- **Evals en `plugins/desa/evals/`** para `claude plugin eval`, con fixtures de repos de juguete. Fijan fallos que ya se dieron: un cambio sin stagear solo en `apps/mobile` se revisa como mobile y cita #65 (el bug de `DIFF_FILES`); `/desa:plan` reconoce un websites; el formato A de triage; que translations se invoque cuando lo pide el `CLAUDE.md` y nadie edite a mano los ficheros de idioma; y que `/desa:update` no se lance sola. El de magic-factorial falla a propósito hasta que se decida su diseño. Están escritos con la documentación de `plugin eval` y sin ejecutar: la 2.1.236 aún no tiene el subcomando.
+- **CI en `.github/workflows/ci.yml`** — En cada PR y en cada push a `main`: las pruebas de `tests/`, `claude plugin validate --strict` del marketplace y del plugin, que la versión suba y tenga su entrada en el CHANGELOG si cambia `plugins/desa/`, y un aviso si alguna skill preaprueba intérpretes, red o git/gh completos.
+- **Entrada 1.9.0 del CHANGELOG**, que faltaba.
+
+### Changed
+
+- **README** — Tabla de las 7 skills con qué escribe cada una fuera del chat y si el modelo la puede lanzar sola, una sección por skill, el token de la API, la política de `allowed-tools`, el mantenimiento de los criterios, versiones, pruebas, CI y evals. «Actualización» usa `/desa:update` (antes solo refrescaba el catálogo, no el plugin instalado) y menciona `/reload-plugins`.
+
 ## [1.15.0] — 2026-09-28
 
 Bloque 5 de la auditoría (`docs/auditorias/2026-09-28-skills-opus-5-5.md`): contexto y estilo para Opus 5.5.
@@ -194,6 +208,16 @@ Bloque 5 de la auditoría (`docs/auditorias/2026-09-28-skills-opus-5-5.md`): con
 ### Changed
 
 - **Fase 7 de `/desa:review` ahora es diff-aware**: la generación de tests faltantes se dispara cuando hay **líneas nuevas/modificadas del diff sin cubrir**, en lugar de depender de un umbral de cobertura global del proyecto. Esto alinea la skill con el modelo de **patch coverage** de `desa-websites` (gate por diff, sin umbral global): un dev recibe propuestas de test para cualquier fichero unit-testeable que toque, sin backfill del legacy.
+
+## [1.9.0] — 2026-05-28
+
+### Added
+
+- **Nueva skill `/desa:magic-factorial`** — gestiona fichajes (attendance shifts) de Factorial a través de su API GraphQL interna, autenticada con las cookies de sesión del navegador. Permite crear los días que faltan, reescribir fichajes incorrectos y cuadrar a 0 el balance mensual. Detecta jornadas reducidas y festivos a partir de `expectedMinutes`, usa siempre `+00:00` por un fallo de zona horaria de la API, fuerza el recálculo con un «touch pass» después de crear y no toca los periodos cerrados.
+
+### Notes
+
+- Entrada añadida después: la 1.9.0 no tenía entrada en el CHANGELOG. El mensaje del commit (`0fce63a`) dice «1.6.0 → 1.7.0», pero el cambio real de `plugin.json` fue de 1.8.0 a 1.9.0.
 
 ## [1.8.0] — 2026-05-11
 
