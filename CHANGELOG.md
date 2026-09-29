@@ -5,6 +5,22 @@ All notable changes to the `desa` plugin will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.18.2] — 2026-09-29
+
+Correcciones de la ronda de verificación acotada al diff de la 1.18.1. Las tres son de gravedad baja y van por el lado seguro: `CONEXIONES_REALES` marcaba de más, así que review dejaba de ejecutar sola tests que sí eran seguros.
+
+### Fixed
+
+- **`CONEXIONES_REALES`**:
+  - una `url` de sqlite, o una cuyo host es local, ya no cuenta como servidor real, y en un `dsn` se mira su `Server=` o `host=`. Con `DB_URL=sqlite:///:memory:` en `phpunit.xml`, todas las conexiones que leen `DB_URL` salían como reales;
+  - `getenv()`, `\env()` y `Env::get()` se tratan como `env()`: su primer argumento es el nombre de una variable, no un host;
+  - se ignoran los literales sin letras ni números, como la `,` de `explode(',', env('DB_READ_HOSTS'))`.
+- **`tests/test-context.test.sh`** ya no depende de las variables del shell de quien lo ejecuta: con `DB_HOST` exportado fallaba una prueba.
+
+### Notes
+
+- Con esta versión termina la verificación de la auditoría. La ronda acotada no encontró nada grave, así que se cumple la regla de paro del triage.
+
 ## [1.18.1] — 2026-09-29
 
 Correcciones de la verificación adversarial de la 1.18.0.

@@ -170,6 +170,8 @@ if ($src === false) exit(2);
 try { $toks = token_get_all($src, TOKEN_PARSE); } catch (Throwable $e) { exit(2); }
 $t = [];
 foreach ($toks as $x) if (!is_array($x) || !in_array($x[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) $t[] = $x;
+$fq = defined("T_NAME_FULLY_QUALIFIED") ? T_NAME_FULLY_QUALIFIED : -1;
+$qn = defined("T_NAME_QUALIFIED") ? T_NAME_QUALIFIED : -1;
 $lit = function ($x) { return is_array($x) && $x[0] === T_CONSTANT_ENCAPSED_STRING ? stripcslashes(substr($x[1], 1, -1)) : null; };
 $st = [];
 for ($i = 0, $n = count($t); $i < $n; $i++) {
@@ -177,7 +179,13 @@ for ($i = 0, $n = count($t); $i < $n; $i++) {
     if ($v === "[") { $st[] = ["arr" => true, "key" => null]; continue; }
     if (is_array($x) && $x[0] === T_ARRAY && ($t[$i + 1] ?? null) === "(") { $st[] = ["arr" => true, "key" => null]; $i++; continue; }
     if ($v === "(") {
-        $env = $i > 0 && is_array($t[$i - 1]) && $t[$i - 1][0] === T_STRING && strtolower($t[$i - 1][1]) === "env";
+        $p = $t[$i - 1] ?? null; $env = false;
+        if (is_array($p) && in_array($p[0], [T_STRING, $fq, $qn], true)) {
+            $fn = strtolower(ltrim($p[1], "\\"));
+            $env = in_array($fn, ["env", "getenv"], true);
+            if (!$env && $fn === "get" && is_array($t[$i - 2] ?? null) && $t[$i - 2][0] === T_DOUBLE_COLON && is_array($t[$i - 3] ?? null))
+                $env = preg_match("/(^|\\\\)env$/i", $t[$i - 3][1]) === 1;
+        }
         $st[] = ["arr" => false, "env" => $env, "arg" => 0]; continue;
     }
     if ($v === "]" || $v === ")") { array_pop($st); continue; }
@@ -195,12 +203,13 @@ for ($i = 0, $n = count($t); $i < $n; $i++) {
     if ($key === null) continue;
     $top = $st[$k];
     $kind = !$top["arr"] && $top["env"] && $top["arg"] === 0 ? "VAR" : "LIT";
+    if ($kind === "LIT" && !preg_match("/[A-Za-z0-9]/", $s)) continue;
     echo $names[$c + 1], "\t", $key, "\t", $kind, "\t", str_replace(["\t", "\n"], " ", $s), "\n";
 }
 '
 conexiones_reales() {
   [ -f config/database.php ] || return 0
-  local out conn key kind val v real=""
+  local out conn key kind val v h real=""
   if ! out=$(php -r "$CONEX_PHP" config/database.php 2>/dev/null); then
     echo "desconocido (no se ha podido analizar config/database.php con el tokenizer de php)"; return
   fi
@@ -208,7 +217,17 @@ conexiones_reales() {
     [ -n "$conn" ] || continue
     if [ "$kind" = VAR ]; then v=$(laravel_var "$val"); v=${v%%$'\t'*}; else v=$val; fi
     [ -n "$v" ] || continue
-    if [ "$key" = host ]; then case "$v" in localhost|127.0.0.1|::1) continue ;; esac; fi
+    case "$key" in
+      url)
+        case "$v" in sqlite:*) continue ;; esac
+        # El host de scheme://usuario@host:puerto/…
+        v=$(printf '%s' "$v" | sed -E 's#^[A-Za-z0-9+.-]+://([^@/]*@)?(\[[^]]*\]|[^:/?]*).*#\2#') ;;
+      dsn)
+        # Server= o host= de un dsn de odbc o de pdo; sin ellos, cuenta como real.
+        h=$(printf '%s' "$v" | sed -nE 's#.*(^|[;:])[[:space:]]*([Ss][Ee][Rr][Vv][Ee][Rr]|[Hh][Oo][Ss][Tt])=([^;,]*).*#\3#p')
+        [ -n "$h" ] && v=$h ;;
+    esac
+    case "$v" in localhost|127.0.0.1|::1|'[::1]') continue ;; esac
     case " $real " in *" $conn "*) ;; *) real="${real:+$real }$conn" ;; esac
   done <<EOF
 $out

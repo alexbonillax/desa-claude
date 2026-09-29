@@ -33,7 +33,8 @@ EOF
 }
 
 # Sin las variables de BD de quien ejecuta las pruebas; runenv añade las que se le pasen.
-CLEAN=(env -u DB_CONNECTION -u DB_DATABASE -u DB_URL -u DATABASE_URL -u APP_CONFIG_CACHE)
+CLEAN=(env -u DB_CONNECTION -u DB_DATABASE -u DB_URL -u DATABASE_URL -u DB_HOST -u APP_CONFIG_CACHE
+  -u OTRA_HOST -u SECUNDARIA_HOST -u LOCAL_HOST -u A -u B -u X -u READ_HOSTS -u LEGACY_HOST -u URL_LOCAL)
 run() { OUT=$("${CLEAN[@]}" "$BASH" "$SCRIPT" 2>&1); }
 runenv() { OUT=$("${CLEAN[@]}" "$@" "$BASH" "$SCRIPT" 2>&1); }
 expect() {
@@ -329,6 +330,28 @@ printf 'SECUNDARIA_HOST=10.0.0.5\n' > .env.testing
 PATH="$ROOT/bin-none:$PATH" run
 if [ -n "$REAL_PHP" ]; then
   expect "conexiones: read/write, una línea, array(), saltos de línea, env() anidado y variables resueltas" "CONEXIONES_REALES=anidado elvis linea rw siguiente variable vieja"
+  cat > config/database.php <<'EOF'
+<?php
+
+return [
+    'connections' => [
+        'sqlite' => ['driver' => 'sqlite', 'url' => env('DB_URL'), 'database' => ':memory:'],
+        'mysql' => ['driver' => 'mysql', 'url' => env('DB_URL'), 'host' => env('DB_HOST', '127.0.0.1')],
+        'urllocal' => ['driver' => 'mysql', 'url' => env('URL_LOCAL', 'mysql://root@127.0.0.1:3306/app')],
+        'urlremota' => ['driver' => 'mysql', 'url' => 'mysql://u:p@db.example.com/app'],
+        'replicas' => ['read' => ['host' => explode(',', env('READ_HOSTS', '127.0.0.1'))]],
+        'legacy' => ['host' => getenv('LEGACY_HOST') ?: '127.0.0.1'],
+        'fq' => ['host' => \env('LOCAL_HOST', 'localhost')],
+        'envget' => ['host' => \Illuminate\Support\Env::get('LOCAL_HOST', 'localhost')],
+        'odbclocal' => ['driver' => 'odbc', 'dsn' => 'Driver=X;Server=localhost;Port=1'],
+    ],
+];
+EOF
+  printf 'LEGACY_HOST=127.0.0.1\n' > .env.testing
+  PATH="$ROOT/bin-none:$PATH" runenv DB_URL=sqlite:///:memory:
+  expect "URLs de sqlite o locales, explode(), getenv(), \\env() y Env::get() no son servidores" "CONEXIONES_REALES=urlremota"
+  PATH="$ROOT/bin-none:$PATH" runenv LEGACY_HOST=legacy.example.com READ_HOSTS=10.0.0.7
+  expect "getenv() y explode() con servidores de verdad" "CONEXIONES_REALES=legacy replicas urlremota"
   printf '<?php return [\n' > config/database.php
   PATH="$ROOT/bin-none:$PATH" run
   expect "config/database.php que no se puede analizar" "CONEXIONES_REALES=desconocido (no se ha podido analizar config/database.php con el tokenizer de php)"
