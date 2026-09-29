@@ -13,7 +13,8 @@ redirecciones y solo se admiten las rutas de la wiki y de terms.
 
 PATH: /documents, /documents/root, /documents/new, /documents/{id}, /terms, /terms/new,
 /terms/{id} o /locales; los parámetros, siempre con --param. --save-content guarda el
-fields.content de la respuesta y --content-from lo toma de un fichero, los dos dentro de workdir.
+fields.content de la respuesta y --content-from lo toma de un fichero, los dos dentro de workdir
+y sin cambiar los saltos de línea.
 
 Las peticiones imprimen {"status": N, "body": ...}. Exit: 0 si la respuesta es 2xx,
 1 si la API responde con error (también un 3xx), 2 sin token o con un token inválido,
@@ -26,6 +27,7 @@ import json
 import os
 import pathlib
 import re
+import stat
 import sys
 import urllib.error
 import urllib.parse
@@ -33,7 +35,7 @@ import urllib.request
 
 BASE_URL = 'https://api2.grupodesa.app'
 TIMEOUT = 60
-ALLOWED_PATH = re.compile(r'^/(documents(/(root|new|\d+))?|terms(/(new|\d+))?|locales)$')
+ALLOWED_PATH = re.compile(r'/(documents(/(root|new|[0-9]+))?|terms(/(new|[0-9]+))?|locales)')
 
 
 def home():
@@ -49,23 +51,32 @@ def settings_file():
 
 
 def workdir():
+    """~/.cache/desa, que tiene que ser un directorio propio: no se sigue si es un enlace."""
     d = home() / '.cache' / 'desa'
-    d.mkdir(parents=True, exist_ok=True)
+    d.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        d.mkdir(mode=0o700)
+    except FileExistsError:
+        pass
+    st = os.lstat(d)
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
+        raise ValueError(f'{d} tiene que ser un directorio tuyo, no un enlace simbólico ni otra cosa: revísalo o bórralo')
     os.chmod(d, 0o700)
     return d
 
 
 def valid_token(t):
-    return bool(t) and not any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in t)
+    """Solo ASCII visible: lo que puede ir tal cual en la cabecera Authorization."""
+    return bool(re.fullmatch(r'[!-~]+', t or ''))
 
 
 def token_source():
-    """(token, fuente) del primer token definido. Si esa fuente tiene un token con espacios o
-    caracteres de control, devuelve (None, fuente): el valor no se usa ni se enseña."""
+    """(token, fuente) del primer token definido. Si esa fuente tiene un token con espacios,
+    caracteres de control o no ASCII, devuelve (None, fuente): el valor no se usa ni se enseña."""
     candidates = [(os.environ.get('DESA_API_TOKEN', ''), 'DESA_API_TOKEN')]
     f = token_file()
     if f.is_file():
-        candidates.append((f.read_text(encoding='utf-8'), str(f)))
+        candidates.append((f.read_text(encoding='utf-8', errors='replace'), str(f)))
     try:
         s = json.loads(settings_file().read_text(encoding='utf-8'))
     except (OSError, ValueError):
@@ -83,7 +94,7 @@ def token_source():
 def save_token(token):
     token = token.strip()
     if not valid_token(token):
-        raise ValueError('token vacío o con espacios o caracteres de control')
+        raise ValueError('token vacío o con espacios, caracteres de control o caracteres no ASCII')
     f = token_file()
     f.parent.mkdir(parents=True, exist_ok=True)
     os.chmod(f.parent, 0o700)
@@ -113,7 +124,7 @@ def build_url(path, params=None):
     if parts.scheme or parts.netloc:
         raise ValueError('PATH debe ser una ruta de la API, no una URL')
     clean = parts.path.rstrip('/') or '/'
-    if not ALLOWED_PATH.match(clean):
+    if not ALLOWED_PATH.fullmatch(clean):
         raise ValueError(f'ruta no permitida: {clean} (solo /documents…, /terms… y /locales)')
     query = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
     query += list(params or [])
@@ -139,7 +150,11 @@ def request(method, path, params=None, body=None):
         with _OPENER.open(req, timeout=TIMEOUT) as resp:
             return resp.status, _parse(resp.read())
     except urllib.error.HTTPError as e:
-        return e.code, _parse(e.read())
+        try:
+            raw = e.read()
+        except (OSError, http.client.HTTPException) as err:
+            return None, {'error': f'respuesta HTTP {e.code} incompleta: {type(err).__name__}: {err}'}
+        return e.code, _parse(raw)
     except urllib.error.URLError as e:
         return None, {'error': str(e.reason)}
     except (OSError, http.client.HTTPException) as e:
@@ -158,9 +173,24 @@ def _in_workdir(value):
     p = pathlib.Path(value).expanduser()
     wd = workdir().resolve()
     target = (p if p.is_absolute() else wd / p).resolve()
-    if target != wd and wd not in target.parents:
+    if wd not in target.parents:
         raise ValueError(f'el fichero tiene que estar dentro de {wd}')
+    if target.is_dir() or not target.parent.is_dir():
+        raise ValueError(f'{target} no vale: tiene que ser un fichero en un directorio que ya exista')
+    if target.exists() and os.lstat(target).st_nlink > 1:
+        # Un enlace duro llevaría a un fichero de fuera: --content-from lo enviaría a la API.
+        raise ValueError(f'{target} no vale: tiene otros enlaces duros, así que puede ser un fichero de fuera de {wd}')
     return target
+
+
+def _content(parsed):
+    """fields.content de la respuesta ('' si es null), o None si no es un documento."""
+    data = parsed.get('data') if isinstance(parsed, dict) else None
+    fields = data.get('fields') if isinstance(data, dict) else None
+    if not isinstance(fields, dict):
+        return None
+    content = fields.get('content')
+    return '' if content is None else (content if isinstance(content, str) else None)
 
 
 def _usage(msg):
@@ -170,7 +200,7 @@ def _usage(msg):
 
 def _no_token(source):
     if source:
-        print(f'TOKEN_INVALIDO en {source}: tiene espacios o caracteres de control', file=sys.stderr)
+        print(f'TOKEN_INVALIDO en {source}: tiene espacios, caracteres de control o caracteres no ASCII', file=sys.stderr)
     else:
         print('NO_TOKEN', file=sys.stderr)
     return 2
@@ -203,7 +233,10 @@ def main(argv):
         return 0
 
     if cmd == 'workdir':
-        print(workdir())
+        try:
+            print(workdir())
+        except (OSError, ValueError) as e:
+            return _usage(str(e))
         return 0
 
     if cmd not in ('GET', 'POST', 'DELETE'):
@@ -234,7 +267,9 @@ def main(argv):
             return _usage('POST necesita --body FICHERO.json')
         if content_from is not None:
             doc = json.loads(body.decode('utf-8'))
-            doc.setdefault('fields', {})['content'] = content_from.read_text(encoding='utf-8')
+            if not isinstance(doc, dict) or not isinstance(doc.setdefault('fields', {}), dict):
+                raise ValueError('con --content-from, --body tiene que ser un objeto con fields')
+            doc['fields']['content'] = content_from.read_bytes().decode('utf-8')
             body = json.dumps(doc, ensure_ascii=False).encode('utf-8')
         build_url(path, params)
     except (OSError, ValueError) as e:
@@ -248,8 +283,15 @@ def main(argv):
     if status is None:
         return 3
     if save_to is not None and 200 <= status < 300:
-        content = ((parsed or {}).get('data') or {}).get('fields', {}).get('content') if isinstance(parsed, dict) else None
-        save_to.write_text(content or '', encoding='utf-8')
+        content = _content(parsed)
+        if content is None:
+            print('ERROR=la respuesta no es un documento con data.fields.content: no se guarda nada', file=sys.stderr)
+            return 1
+        try:
+            save_to.write_bytes(content.encode('utf-8'))
+        except (OSError, UnicodeEncodeError) as e:
+            print(f'ERROR=no se pudo guardar {save_to}: {e}', file=sys.stderr)
+            return 1
         print(f'CONTENIDO_GUARDADO={save_to}')
     return 0 if 200 <= status < 300 else 1
 

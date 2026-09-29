@@ -5,6 +5,65 @@ All notable changes to the `desa` plugin will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.17.0] — 2026-09-29
+
+Correcciones de la verificación adversarial de la 1.14.0 y la 1.15.0.
+
+### Security
+
+- **`ENTORNO_TEST` calcula la BD que vería Laravel de verdad** — Solo miraba ficheros, y daba «aislado» en casos en que los tests irían contra la BD real:
+  - una variable del proceso (`DB_CONNECTION`, `DB_DATABASE`) gana al `<env>` de `phpunit.xml`, aunque lleve `force="true"`, y a `.env.testing`;
+  - `DB_URL` o `DATABASE_URL` deciden el driver aunque la conexión sea `sqlite`;
+  - un `<server name="APP_ENV">` distinto de `testing` anula el prefijo `APP_ENV=testing`;
+  - con la configuración cacheada (`bootstrap/cache/config.php` o `APP_CONFIG_CACHE`), Laravel no lee ni `.env` ni `.env.testing` ni `phpunit.xml`;
+  - el sqlite de `.env` o del entorno, o el `database/database.sqlite` por defecto, pueden ser la BD de desarrollo del dev.
+
+  Ahora solo cuenta como aislado un sqlite fijado en `phpunit.xml` o `.env.testing`, en memoria o en un fichero fijado ahí, sin URL que no sea sqlite. Lee también `phpunit.dist.xml`, atributos en cualquier orden y con comillas simples, y `export`, comillas y comentarios en los `.env`. grupodesa-backend sigue saliendo aislado (`.env.testing` con `:memory:`).
+
+- **`terms.py` ya no borra ni corrompe datos ajenos al cambio**:
+  - `delete --code ''` (o `--ns ''`) borraba el primer term del namespace, porque la API ignora los filtros vacíos y devuelve un listado. Y como la API no distingue mayúsculas, `--code Global.Save` borraba `global.save`. Ahora `--ns` y `--code` se validan con el formato de la API y se aborta si la API devuelve un term distinto del pedido;
+  - en upsert, los idiomas del term que no están en `/locales` se quitaban del POST, y la API sustituye `value` entero: se borraban. Ahora se conservan;
+  - en gdapps, `upsert --ns app` escribía en el `app` propio del proyecto un term del `app` de grupodesa. Con esa clave compartida, el siguiente sync proponía dar de baja las 1.258 claves locales. upsert y delete se niegan ahora con `NAMESPACE_AJENO`;
+  - `parse_php` leía distinto de PHP los escapes `\x` y octales (bytes en PHP), un `$` seguido de un carácter no ASCII y los comentarios que acaban en CR o en `?>`. Como upsert y delete reescriben el fichero entero, corrompían claves que no tenían que ver. Ahora se leen como en PHP o el fichero se rechaza, comprobado con unos 1.000 ficheros aleatorios y con los 110 reales frente a PHP 8.2;
+  - la escritura local es atómica (temporal y `os.replace`) y se codifica antes de llamar a la API. Si falla, `ERROR_LOCAL=` dice qué se escribió y qué no, también en sync;
+  - `sync --include-ns auth` sobrescribía el fichero de Laravel, y `--include-ns` no podía sustituir un `NAMESPACE_AJENO` aunque el aviso lo ofreciera. Las dos cosas quedan corregidas.
+
+### Fixed
+
+- **`terms.py`**:
+  - `lang/vendor` (de `vendor:publish`) ya no bloquea sync, upsert ni delete;
+  - `CAMBIA_FORMATO=N` marca los ficheros que se reescribirían con otro formato y perderían sus comentarios, con o sin cambios de datos. En grupodesa-api y gdapps pasa con todos, y translations pide confirmación;
+  - los errores de red de `http.client` salen como error de red.
+- **`desa_api.py`**:
+  - una respuesta de error cortada o con timeout sale con 3, no con un traceback;
+  - los tokens tienen que ser ASCII visible, así que un espacio de ancho cero pegado del portapapeles ya no acaba en un traceback que enseña su posición;
+  - las rutas solo admiten dígitos ASCII;
+  - `~/.cache/desa` no se sigue si es un enlace, y un fichero con enlaces duros dentro de él se rechaza, porque `--content-from` podría enviar a la wiki un fichero de fuera;
+  - `--save-content` comprueba el destino antes de la petición y no guarda nada si la respuesta no es un documento;
+  - `--save-content` y `--content-from` conservan los saltos de línea (CRLF y CR sueltos), así que los párrafos que no se tocan viajan de verdad tal cual.
+- **Paso 6 de `/desa:review`: un fichero de test por ejecución** — PHPUnit 9 y 10 solo ejecutan el primer fichero que se les pasa e ignoran el resto sin avisar, así que con varios el verde era falso. La orden es ahora un bucle que imprime `EXIT=` por fichero.
+- **La orden de cobertura ya no sale siempre con 0** — Terminaba en `echo`, así que un fallo del runner llegaba como verde. Cada fichero tiene su `EXIT=` y su informe en el directorio `COV`.
+- **Paso 7**: los ficheros sin trackear cuentan enteros como líneas añadidas (no salen en `DIFF_U0`), y en modo PR sin base local las líneas añadidas salen del `gh pr diff`.
+- **Modo PR con `origin/{base}` desactualizado** — `diff-context.sh` usa como base el commit que da GitHub (`baseRefOid`). Con `origin/{base}` atrasado, el merge-base era antiguo y `DIFF_U0` metía commits ajenos a la PR. Si esa base no está en local, no da `PR_BASE` ni `DIFF_U0` y lo avisa.
+- **Clon superficial en GitHub Actions** — Con `fetch-depth: 1` no se puede reconocer el merge commit de la PR: ahora lo dice un `AVISO`, y review.md documenta que hace falta `fetch-depth: 2`.
+- **Árbol distinto del revisado** — Con `--path`, un `AVISO` cuenta los cambios sin commitear de fuera de la ruta, que los tests también ven. Con `FUENTE=staged`, si un test derivado del diff tiene cambios sin stagear, los tests se omiten.
+- **Fallos ajenos al diff** — Las reglas del Paso 7 los contaban como rojo y a la vez decían que no bloqueaban. Ya no bloquean, y el informe los lista en «Fallos ajenos al diff».
+- CHANGELOG 1.14.0: en gdapps el sqlite no está comentado en `phpunit.xml`, no aparece.
+- **review.md, lo que quedaba de P1-21** — Tras compactar se conservan unos 5.000 tokens del principio de la skill, y review.md tiene unos 7.000. El formato del Paso 8 y los límites del Paso 7 quedaban fuera, y con ellos la prohibición de `RefreshDatabase` en los tests generados y la de commit y push. Ahora el principio lleva un resumen del informe y los límites irreversibles de los Pasos 6 y 7, y dice que se relean también los `criterios-*.md` si ya no está su texto.
+- **La plantilla «Sin incidencias» lleva el recuento de descartadas** — Sin incidencias reportadas, las descartadas volvían a desaparecer.
+- **`/desa:update`**:
+  - comprueba antes de actualizar que el clon del marketplace no tiene cambios ni commits sin subir. Si el `git pull` falla, Claude Code vuelve a clonar y los borra sin avisar, y el comando sale bien;
+  - compara también con la versión que tiene cargada la sesión, para no decir «ya tenías la última» sin avisar de `/reload-plugins`;
+  - lista solo lo publicado (`{gitCommitSha}..@{u}`);
+  - avisa de que las órdenes `git -C` pedirán permiso.
+- **`/desa:triage`** — El encargo de cada agente incluye que solo mida en local y sin tocar una BD: `Explore` tiene Bash, pero no puede pedir la confirmación que la skill exige para el resto. Incluye también el aviso de `EXPLAIN ANALYZE`. La regla de `http_code` ya no descarta los 404 y 401 que se miden a propósito al aislar capas. La invocación de `/desa:plan` lleva «Medido» y «Regla de paro», y plan no los reconstruye si no vienen.
+- Referencias obsoletas: plan.md seguía citando «los #N de review.md» y «las dos secciones», y wiki.md remitía a un «Antes de cualquier POST» que ya no existe. Quitadas también las mayúsculas de reglas que no son irreversibles.
+
+### Notes
+
+- Un term antiguo con un code que no cumple el formato actual de la API (p. ej. con mayúsculas) ya no se puede buscar ni borrar con `terms.py`: se rechaza antes de llamar a la API.
+- En un backend, upsert y delete piden ahora a la API todas las páginas del namespace cuando existe en local, para comprobar `NAMESPACE_AJENO`.
+
 ## [1.16.0] — 2026-09-28
 
 Bloque 6 de la auditoría (`docs/auditorias/2026-09-28-skills-opus-5-5.md`): evals y documentación.
@@ -26,7 +85,7 @@ Bloque 5 de la auditoría (`docs/auditorias/2026-09-28-skills-opus-5-5.md`): con
 ### Changed
 
 - **Los criterios de `/desa:review` salen a `plugins/desa/references/`** — `criterios-compartidos.md` (#1-9), `criterios-backend.md` (#10-33), `criterios-frontend.md` (#34-81), `criterios-mobile.md` (#65 y #82-85) y `criterios-websites.md` (#86-106), cada criterio una vez y con su texto. La skill carga solo los del tipo que toca el diff, y `/desa:plan` lee los mismos ficheros en vez de una copia. Revierte la decisión de la 1.8.0 de no crear subcarpetas: los criterios eran el 57 % de review.md, y tras una compactación, que solo conserva el principio de cada skill, se perdían el formato del informe y las reglas. Los `#N` no se renumeran nunca; los nuevos van al final de su fichero (el siguiente es #107) y los retirados se marcan. Los gemelos de websites llevan `(= #N)`, y mobile declara que no hereda los criterios de frontend.
-- **review.md empieza por el flujo, la severidad y los límites**, y dice que se relea el fichero si tras compactar falta algo. Las secciones de reglas se llaman «Límites» en todas las skills.
+- **review.md empieza por el flujo, la severidad y los límites**, y dice que se relea el fichero si tras compactar falta algo. Las secciones de reglas se llaman «Límites» en review, plan, triage y translations; wiki ya no tiene una sección de reglas aparte, y magic-factorial queda fuera por decisión del autor.
 - **Umbral de confianza con evidencia** — Una incidencia solo se reporta con su evidencia (la línea del diff y, en los criterios de patrón, el fichero de referencia leído) y confianza >= 75. Las descartadas se cuentan en el Resumen en vez de omitirse en silencio, y `--verbose` las lista con su evidencia.
 - **Linter frente a criterios** — La regla de no reportar lo que ve un linter solo cubre lo que no tiene criterio propio: los numerados, como #34 o #86, se aplican siempre.
 - **Diffs de más de 20 ficheros** — Se revisan todos, con aviso de que por directorio sale más detalle, y lo que no se revise va en «sin revisar».
@@ -49,7 +108,7 @@ Bloque 5 de la auditoría (`docs/auditorias/2026-09-28-skills-opus-5-5.md`): con
   - solo lo envía a `api2.grupodesa.app`: no sigue redirecciones (la API tiene GET que redirigen a S3 o a Factorial) y solo admite las rutas de la wiki y de terms (`/documents…`, `/terms…`, `/locales`), así que un GET preaprobado no puede llegar, por ejemplo, a `/customers/{id}/token`.
 
   Para guardarlo sin pegarlo en el chat: `! pbpaste | python3 …/desa_api.py set-token --stdin` (fichero 600, carpeta 700). A quien ya lo tenga en `desa_wiki_token` no le hace falta cambiar nada. No se mueve a la clave `env` de settings.json porque eso lo exportaría a todos los procesos de Bash.
-- **El Paso 6 de `/desa:review` no ejecuta tests de backend si el entorno no está aislado** — `APP_ENV=testing` solo es seguro si `phpunit.xml` o `.env.testing` fijan una BD sqlite. En grupodesa-api, gdapps y desa-connect no es así (el sqlite de `phpunit.xml` está comentado y no hay `.env.testing`), así que Laravel carga `.env`, que es MySQL remoto, y un test con `RefreshDatabase` haría `migrate:fresh` sobre él. `test-context.sh` imprime ahora `ENTORNO_TEST=aislado|no-aislado|desconocido` con el motivo, y sin `aislado` la revisión no ejecuta ningún test. Hoy solo grupodesa-backend está aislado.
+- **El Paso 6 de `/desa:review` no ejecuta tests de backend si el entorno no está aislado** — `APP_ENV=testing` solo es seguro si `phpunit.xml` o `.env.testing` fijan una BD sqlite. En grupodesa-api, gdapps y desa-connect no es así (en grupodesa-api y desa-connect el sqlite de `phpunit.xml` está comentado, en gdapps no aparece, y ninguno tiene `.env.testing`), así que Laravel carga `.env`, que es MySQL remoto, y un test con `RefreshDatabase` haría `migrate:fresh` sobre él. `test-context.sh` imprime ahora `ENTORNO_TEST=aislado|no-aislado|desconocido` con el motivo, y sin `aislado` la revisión no ejecuta ningún test. Hoy solo grupodesa-backend está aislado.
 
 ### Added
 

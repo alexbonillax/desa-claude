@@ -19,7 +19,7 @@ Después, `/reload-plugins` o reiniciar la sesión.
 /desa:update
 ```
 
-Refresca el marketplace, actualiza el plugin y dice de qué versión a qué versión ha pasado y qué trae. Si no hay versión nueva, también lo dice.
+Comprueba que el clon del marketplace no tiene trabajo sin subir (una actualización fallida lo vuelve a clonar y lo borra), refresca el marketplace, actualiza el plugin y dice de qué versión a qué versión ha pasado y qué trae. Si no hay versión nueva, también lo dice, y avisa si la sesión sigue con una versión anterior.
 
 A mano, lo mismo son dos órdenes: `claude plugin marketplace update desa` y `claude plugin update desa@desa`. `/plugin marketplace update desa` solo refresca el catálogo, no el plugin instalado.
 
@@ -98,7 +98,7 @@ Gestiona los terms de traducción vía API y sincroniza los ficheros de idioma d
 /desa:translations sincroniza
 ```
 
-Todo pasa por `scripts/terms.py`: sin `--apply` solo enseña lo que haría, escribe los ficheros con el mismo formato que ya tienen, escapa bien los valores en PHP y no escribe nada si la API da un error. Pide confirmación antes de sobrescribir traducciones, de publicar traducciones propuestas por Claude, o de sincronizar si hay bajas o cambios sin commitear.
+Todo pasa por `scripts/terms.py`: sin `--apply` solo enseña lo que haría, escribe los ficheros con el formato de grupodesa-front y grupodesa-backend (si un proyecto usa otro, el dry-run lo marca), escapa bien los valores en PHP, lee los PHP sin ejecutarlos y no escribe nada si la API da un error. Pide confirmación antes de sobrescribir traducciones, de publicar traducciones propuestas por Claude, o de sincronizar si hay bajas, cambios sin commitear o ficheros que cambiarían de formato.
 
 ### /desa:update
 

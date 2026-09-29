@@ -17,23 +17,43 @@ Los ficheros PHP se leen sin ejecutarlos. Si alguno no tiene el formato plano qu
 script (o uno equivalente), hace falta --allow-php para cargarlo con PHP, que ejecuta el fichero.
 """
 
+import contextlib
+import errno
+import http.client
 import json
+import os
 import pathlib
 import re
 import shutil
+import stat
 import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import desa_api  # noqa: E402
 
 LARAVEL_OWN = {'auth', 'validation', 'passwords', 'pagination', 'errors'}
 KNOWN_BACKEND_NS = ['app', 'export', 'notifications', 'paper-catalog']
+# code: la regex de TermRequest (grupodesa-backend). namespace: TermRequest solo admite una lista
+# (in:app,notifications,paper-catalog); aquí basta con el mismo formato que un segmento de code.
+NS_RE = re.compile(r'[a-z0-9]+([_-][a-z0-9]+)*')
+CODE_RE = re.compile(r'[a-z0-9]+([_-][a-z0-9]+)*(\.[a-z0-9]+([_-][a-z0-9]+)*)*')
+LANG_RE = re.compile(r'[A-Za-z]{2,3}([_-][A-Za-z0-9]{2,8})*')
 ALLOW_PHP = False
 
 
 class Abort(Exception):
     pass
+
+
+class WriteError(Abort):
+    """Falló la escritura de pending[0]; done ya estaban escritos."""
+
+    def __init__(self, done, pending, error):
+        self.done, self.pending, self.error = done, pending, error
+        super().__init__(f"falló la escritura de {pending[0]} ({type(error).__name__}: {error}); "
+                         f"escritos: {', '.join(done) or 'ninguno'}; sin escribir: {', '.join(pending)}")
 
 
 # --- API ---------------------------------------------------------------------------------
@@ -71,11 +91,19 @@ def api_locales():
 
 
 def api_find(ns, code):
+    """El term ns:code exacto, o None si no existe. La API solo filtra por los valores que llegan y
+    compara sin distinguir mayúsculas: si devuelve otro term (o un listado), se aborta."""
     status, data = api('GET', '/terms', [('filter[code]', code), ('filter[namespace]', ns)], ok=(200, 404))
-    if status == 404 or not data or not data.get('data'):
+    if status == 404:
         return None
-    term = data['data']
-    return clean_term(term[0] if isinstance(term, list) else term)
+    term = data.get('data') if isinstance(data, dict) else None
+    if not isinstance(term, dict):
+        raise Abort(f'la API no devolvió un term al buscar {ns}:{code} (llegó {type(term).__name__}): no se usa')
+    fields = term.get('fields') if isinstance(term.get('fields'), dict) else {}
+    if fields.get('code') != code or fields.get('namespace') != ns:
+        raise Abort(f"la API devolvió otro term al buscar {ns}:{code}: {fields.get('namespace')}:{fields.get('code')} "
+                    f"(id {term.get('id')}); no se usa")
+    return clean_term(term)
 
 
 def api_all_terms(ns):
@@ -105,42 +133,49 @@ def gen_json(d):
     return json.dumps(dict(sorted(d.items())), ensure_ascii=False, indent=2) + '\n'
 
 
-_DQ_ESC = {'n': '\n', 't': '\t', 'r': '\r', 'v': '\v', 'e': '\x1b', 'f': '\f', '\\': '\\', '$': '$', '"': '"'}
-_TOKEN = re.compile(r'''\s+|//[^\n]*|\#[^\n]*|/\*.*?\*/|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|=>|[(),;\[\]]|array\b|return\b''', re.S)
+_DQ_ESC = {'n': b'\n', 't': b'\t', 'r': b'\r', 'v': b'\v', 'e': b'\x1b', 'f': b'\f', '\\': b'\\', '$': b'$', '"': b'"'}
+_WS = ' \t\r\n'
+_TOKEN = re.compile(r'''[ \t\r\n]+|//[^\n]*|\#(?!\[)[^\n]*|/\*.*?\*/|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|=>|[(),;\[\]]|array\b|return\b''', re.S)
 
 
 def _dq(body):
-    out, i = [], 0
+    """Texto entre comillas dobles como lo lee PHP: \\x y los octales son bytes, \\u{} es UTF-8 y
+    el resultado tiene que ser UTF-8 válido."""
+    out, i = bytearray(), 0
     while i < len(body):
-        c = body[i]
-        if c == '$' and i + 1 < len(body) and (body[i + 1].isalpha() or body[i + 1] in '_{'):
+        c, n = body[i], body[i + 1:i + 2]
+        if c == '$' and n and (n in '_{' or not n.isascii() or n.isalpha()):
             raise ValueError('interpolación de variables')
-        if c == '{' and body[i + 1:i + 2] == '$':
+        if c == '{' and n == '$':
             raise ValueError('interpolación de variables')
-        if c != '\\' or i + 1 == len(body):
-            out.append(c)
+        if c != '\\' or not n:
+            out += c.encode('utf-8', 'surrogatepass')
             i += 1
             continue
-        n = body[i + 1]
         if n in _DQ_ESC:
-            out.append(_DQ_ESC[n])
+            out += _DQ_ESC[n]
             i += 2
         elif n in '01234567':
             m = re.match(r'[0-7]{1,3}', body[i + 1:])
-            out.append(chr(int(m.group(0), 8) & 0xFF))
+            out.append(int(m.group(0), 8) & 0xFF)
             i += 1 + len(m.group(0))
         elif n == 'x' and re.match(r'[0-9A-Fa-f]', body[i + 2:i + 3]):
             m = re.match(r'[0-9A-Fa-f]{1,2}', body[i + 2:])
-            out.append(chr(int(m.group(0), 16)))
+            out.append(int(m.group(0), 16))
             i += 2 + len(m.group(0))
         elif n == 'u' and body[i + 2:i + 3] == '{':
-            j = body.index('}', i)
-            out.append(chr(int(body[i + 3:j], 16)))
-            i = j + 1
+            m = re.match(r'\{([0-9A-Fa-f]+)\}', body[i + 2:])
+            if not m or int(m.group(1), 16) > 0x10FFFF:
+                raise ValueError(f'escape \\u{{}} no válido: {body[i:i + 12]!r}')
+            out += chr(int(m.group(1), 16)).encode('utf-8', 'surrogatepass')
+            i += 2 + len(m.group(0))
         else:
-            out.append('\\' + n)
+            out += ('\\' + n).encode('utf-8', 'surrogatepass')
             i += 2
-    return ''.join(out)
+    try:
+        return out.decode('utf-8')
+    except UnicodeDecodeError:
+        raise ValueError(f'los escapes dan texto que no es UTF-8 válido: {body[:40]!r}')
 
 
 def _sq(body):
@@ -149,10 +184,10 @@ def _sq(body):
 
 def parse_php(text):
     """Lee un fichero de idioma plano (return array(...) o [...] de pares texto => texto) sin
-    ejecutarlo. Lanza ValueError si tiene cualquier otra cosa."""
+    ejecutarlo. Lanza ValueError si tiene cualquier otra cosa o algo que PHP leería distinto."""
     text = text.lstrip('\ufeff')
-    if not text.startswith('<?php'):
-        raise ValueError('no empieza por <?php')
+    if not re.match(r'<\?php[ \t\r\n]', text):
+        raise ValueError('no empieza por <?php y un espacio o salto de línea')
     toks, pos = [], 5
     while pos < len(text):
         m = _TOKEN.match(text, pos)
@@ -160,7 +195,9 @@ def parse_php(text):
             raise ValueError(f'sintaxis no admitida cerca de: {text[pos:pos + 30]!r}')
         tok = m.group(0)
         pos = m.end()
-        if tok.isspace() or tok.startswith(('//', '#', '/*')):
+        if tok.startswith(('//', '#')) and ('?>' in tok or '\r' in tok.rstrip('\r')):
+            raise ValueError(f'comentario de una línea con ?> o un retorno de carro suelto: {tok[:30]!r}')
+        if tok[0] in _WS or tok.startswith(('//', '#', '/*')):
             continue
         if tok.startswith('"'):
             toks.append(('s', _dq(tok[1:-1])))
@@ -194,14 +231,21 @@ def parse_php(text):
     return out
 
 
-def load_php(path):
+def read_text(path):
+    """Texto UTF-8 del fichero, sin traducir los saltos de línea (PHP lee \\r\\n tal cual)."""
     try:
-        return parse_php(path.read_text(encoding='utf-8'))
+        return path.read_bytes().decode('utf-8')
+    except UnicodeDecodeError:
+        raise Abort(f'{path} no es UTF-8 válido')
+
+
+def load_php(path):
+    text = read_text(path)
+    try:
+        return parse_php(text)
     except ValueError as e:
         if not ALLOW_PHP:
             raise Abort(f'{path} no tiene el formato plano esperado ({e}); leerlo exige ejecutarlo con PHP: repite con --allow-php si confías en el fichero')
-    except UnicodeDecodeError:
-        raise Abort(f'{path} no es UTF-8 válido')
     if not shutil.which('php'):
         raise Abort(f'hace falta php para leer {path}')
     out = subprocess.run(['php', '-d', 'display_errors=stderr', '-r',
@@ -218,7 +262,7 @@ def load_php(path):
 
 def load_json(path):
     try:
-        return _flat(json.loads(path.read_text(encoding='utf-8')), path)
+        return _flat(json.loads(read_text(path)), path)
     except ValueError as e:
         raise Abort(f'{path} no es JSON válido: {e}')
 
@@ -252,16 +296,19 @@ def local_namespaces(proj):
         return ['app']
     if proj['kind'] != 'backend':
         return []
-    names = {p.stem for p in proj['root'].glob('*/*.php')} - LARAVEL_OWN
+    names = {p.stem for lang in local_langs(proj) for p in (proj['root'] / lang).glob('*.php')} - LARAVEL_OWN
     return sorted(names)
 
 
 def local_langs(proj):
-    return sorted(p.name for p in proj['root'].iterdir() if p.is_dir()) if proj['root'] else []
+    """Subdirectorios con nombre de idioma; los demás (lang/vendor de Laravel) no se tocan."""
+    if not proj['root']:
+        return []
+    return sorted(p.name for p in proj['root'].iterdir() if p.is_dir() and LANG_RE.fullmatch(p.name))
 
 
 def file_for(proj, lang, ns):
-    if not re.fullmatch(r'[A-Za-z]{2,3}([_-][A-Za-z0-9]{2,8})*', lang or ''):
+    if not LANG_RE.fullmatch(lang or ''):
         raise Abort(f'código de idioma no válido: {lang!r}')
     path = proj['root'] / lang / ('translations.json' if proj['kind'] == 'frontend' else f'{ns}.php')
     root = proj['root'].resolve()
@@ -277,7 +324,13 @@ def read_file(path):
 
 
 def render(path, d):
-    return gen_json(d) if path.suffix == '.json' else gen_php(d)
+    """Bytes del fichero; aborta si el texto no se puede escribir en UTF-8 (un surrogate suelto)."""
+    text = gen_json(d) if path.suffix == '.json' else gen_php(d)
+    try:
+        return text.encode('utf-8')
+    except UnicodeEncodeError as e:
+        raise Abort(f'{path} no se puede escribir en UTF-8: tendría {e.object[e.start:e.end]!r} (un surrogate suelto, '
+                    'del propio fichero o de la API); no se escribe nada')
 
 
 def rel(proj, path):
@@ -295,12 +348,46 @@ def dirty(proj, paths):
     return [line[3:] for line in out.stdout.splitlines() if line.strip()]
 
 
+def _umask():
+    mask = os.umask(0)
+    os.umask(mask)
+    return mask
+
+
+def write_atomic(path, data):
+    """Escribe en un temporal del mismo directorio y lo sustituye con os.replace: el fichero queda
+    entero o como estaba. Respeta los ficheros de solo lectura, los permisos y los enlaces."""
+    path = pathlib.Path(os.path.realpath(path))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        if not os.access(path, os.W_OK):
+            raise PermissionError(errno.EACCES, 'sin permiso de escritura', str(path))
+        mode = stat.S_IMODE(path.stat().st_mode)
+    else:
+        mode = 0o666 & ~_umask()
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f'.{path.name}.', suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'wb') as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
 def write_all(proj, writes):
-    """writes: [(path, content)]. Devuelve las rutas escritas; si una falla, lanza con lo que había escrito."""
+    """writes: [(path, bytes)]. Devuelve las rutas escritas; si una falla, lanza WriteError con lo
+    ya escrito y lo que queda sin escribir."""
     done = []
-    for path, content in writes:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding='utf-8')
+    for n, (path, data) in enumerate(writes):
+        try:
+            write_atomic(path, data)
+        except Exception as e:
+            raise WriteError(done, [rel(proj, p) for p, _ in writes[n:]], e)
         done.append(rel(proj, path))
     return done
 
@@ -359,6 +446,10 @@ def _read_values(src):
     for lang, text in values.items():
         if not isinstance(text, str) or not text.strip():
             raise Abort(f'valor vacío o no textual para "{lang}": no se envían cadenas vacías')
+        try:
+            text.encode('utf-8')
+        except UnicodeEncodeError:
+            raise Abort(f'el valor de "{lang}" tiene un surrogate suelto (p. ej. \\ud83d): no es UTF-8 válido')
     return values
 
 
@@ -367,8 +458,36 @@ def _check_ns(proj, ns):
         raise Abort(f'{ns} es un fichero propio de Laravel: no viene de la API y no se toca')
 
 
+def local_keys(proj, ns):
+    """Claves del namespace en los ficheros locales de un backend; vacío si no existe en local."""
+    if proj['kind'] != 'backend' or ns not in local_namespaces(proj):
+        return set()
+    keys = set()
+    for lang in local_langs(proj):
+        keys |= set(read_file(file_for(proj, lang, ns)) or {})
+    return keys
+
+
+def foreign_ns(proj, ns, terms=None):
+    """Claves locales del namespace si ninguna está en el mismo namespace de la API (es otro
+    namespace que se llama igual); vacío si no lo es. Sin terms, los pide a la API si hace falta."""
+    keys = local_keys(proj, ns)
+    if not keys:
+        return set()
+    if terms is None:
+        terms = api_all_terms(ns)
+    return set() if keys & {t['fields']['code'] for t in terms} else keys
+
+
+def _check_foreign(proj, ns, why):
+    keys = foreign_ns(proj, ns)
+    if keys:
+        raise Abort(f'NAMESPACE_AJENO: el namespace {ns} de este proyecto tiene {len(keys)} claves y ninguna está en el {ns} '
+                    f'de la API, así que son dos namespaces distintos con el mismo nombre; no se escribe nada: {why}')
+
+
 def _local_plan(proj, ns, code, values, remove=False):
-    """[(path, contenido)] a escribir, calculado sin escribir nada."""
+    """[(path, bytes)] a escribir, calculado y codificado sin escribir nada."""
     if proj['kind'] == 'no-project':
         return []
     if proj['kind'] == 'frontend' and ns != 'app':
@@ -402,9 +521,9 @@ def _local_plan(proj, ns, code, values, remove=False):
 def _apply_local(proj, writes, api_done):
     try:
         done = write_all(proj, writes)
-    except OSError as e:
-        print(f'{api_done}')
-        print(f'ERROR_LOCAL=la API ya está actualizada, pero falló la escritura local: {e}')
+    except WriteError as e:
+        print(f"{api_done}{' + ' + ', '.join(e.done) if e.done else ''}")
+        print(f'ERROR_LOCAL=la API ya está actualizada, pero {e}')
         return 1
     print(f"{api_done}{' + ' + ', '.join(done) if done else ''}")
     return 0
@@ -420,10 +539,12 @@ def cmd_upsert(args):
     if unknown:
         raise Abort(f"idiomas que no están en /locales: {', '.join(unknown)} (hay: {' '.join(locales)})")
     term = api_find(ns, code)
+    _check_foreign(proj, ns, 'si el term se escribiera en el fichero local, el siguiente sync dejaría de verlo como '
+                             'ajeno y propondría dar de baja las demás claves locales')
     current = dict(term['fields']['value']) if term else {}
-    ignored = sorted(set(current) - set(locales))
-    if ignored:
-        print(f"AVISO=el term tiene idiomas que no están en /locales y se ignoran: {', '.join(ignored)}")
+    kept = {k: v for k, v in current.items() if k not in locales}
+    if kept:
+        print(f"AVISO=el term tiene idiomas que no están en /locales: se conservan en la API y no se escriben en local: {', '.join(sorted(kept))}")
         current = {k: v for k, v in current.items() if k in locales}
     merged = {**current, **new}
     print(f"TERM={ns}:{code} ({'actualizar id ' + str(term['id']) if term else 'crear'})")
@@ -440,7 +561,7 @@ def cmd_upsert(args):
     if not args.get('apply'):
         print('MODO=dry-run (usa --apply para escribir en la API y en los ficheros locales)')
         return 0
-    body = {'fields': {'namespace': ns, 'code': code, 'value': merged}}
+    body = {'fields': {'namespace': ns, 'code': code, 'value': {**kept, **merged}}}
     api('POST', f"/terms/{term['id']}" if term else '/terms/new', body=body)
     return _apply_local(proj, writes, 'ESCRITO=API')
 
@@ -453,7 +574,8 @@ def cmd_delete(args):
     if not term:
         print('NO_EXISTE')
         return 1
-    print(f"TERM={ns}:{code} id {term['id']}")
+    _check_foreign(proj, ns, 'el term no es de este proyecto; bórralo desde el proyecto que usa el namespace de la API')
+    print(f"TERM={term['fields']['namespace']}:{term['fields']['code']} id {term['id']}")
     print(json.dumps(term['fields']['value'], ensure_ascii=False, indent=1))
     writes = _local_plan(proj, ns, code, {}, remove=True)
     if writes:
@@ -466,7 +588,7 @@ def cmd_delete(args):
 
 
 def plan_sync(proj, locales, terms_by_ns):
-    """Devuelve la lista de cambios por fichero sin escribir nada."""
+    """Devuelve la lista de cambios por fichero, con el contenido ya en bytes, sin escribir nada."""
     plan, seen = [], set()
     for ns, terms in terms_by_ns.items():
         for lang in locales:
@@ -486,10 +608,18 @@ def plan_sync(proj, locales, terms_by_ns):
             removes = sorted(set(cur) - set(desired))
             changes = sorted(k for k in set(desired) & set(cur) if desired[k] != cur[k])
             content = render(path, desired)
-            if current is not None and path.read_text(encoding='utf-8') == content:
+            old = path.read_bytes() if current is not None else None
+            if old == content:
                 continue
+            # ¿El fichero actual tiene otro formato? Entonces reescribirlo pierde comentarios y estilo,
+            # también cuando además cambian los datos.
+            try:
+                restyled = old is not None and render(path, current) != old
+            except Abort:
+                restyled = True
             plan.append({'path': path, 'new': current is None, 'adds': adds, 'changes': changes,
-                         'removes': removes, 'content': content})
+                         'removes': removes, 'content': content, 'restyled': restyled,
+                         'format_only': current is not None and not (adds or changes or removes)})
     return plan
 
 
@@ -497,14 +627,16 @@ def cmd_sync(args):
     proj = find_project()
     if proj['kind'] == 'no-project':
         raise Abort('sync necesita estar en un proyecto (packages/i18n/src/locales, resources/lang o lang)')
-    extra = args.get('include_ns') or []
-    if proj['kind'] == 'frontend' and any(ns != 'app' for ns in extra):
+    requested = list(dict.fromkeys(args.get('include_ns') or []))
+    if proj['kind'] == 'frontend' and any(ns != 'app' for ns in requested):
         raise Abort('en frontend solo existe el namespace app: todos van al mismo translations.json')
+    for ns in requested:
+        _check_ns(proj, ns)
     locales = api_locales()
     for lang in locales:
         file_for(proj, lang, 'app')
     wanted = local_namespaces(proj)
-    extra = [ns for ns in extra if ns not in wanted]
+    extra = [ns for ns in requested if ns not in wanted]
     candidates = wanted + extra
     if proj['kind'] == 'backend':
         candidates += [ns for ns in KNOWN_BACKEND_NS if ns not in candidates]
@@ -519,12 +651,10 @@ def cmd_sync(args):
         if ns not in wanted and ns not in extra:
             missing.append(f'{ns} ({len(terms)} terms)')
             continue
-        if ns in wanted and ns not in extra and proj['kind'] == 'backend':
-            local_keys = set()
-            for lang in local_langs(proj):
-                local_keys |= set((read_file(file_for(proj, lang, ns)) or {}).keys())
-            if local_keys and not local_keys & {t['fields']['code'] for t in terms}:
-                foreign.append(f'{ns} ({len(local_keys)} claves locales, ninguna en la API)')
+        if ns not in requested:
+            keys = foreign_ns(proj, ns, terms)
+            if keys:
+                foreign.append(f'{ns} ({len(keys)} claves locales, ninguna en la API)')
                 continue
         terms_by_ns[ns] = terms
 
@@ -538,7 +668,7 @@ def cmd_sync(args):
         print(f"NAMESPACE_AJENO={'; '.join(foreign)} (no se tocan; con --include-ns se sustituirían por los de la API)")
     if missing:
         print(f"SOLO_EN_API={', '.join(missing)} (no existen en local; añadir con --include-ns para crearlos)")
-    removes = 0
+    removes = restyled = 0
     for item in plan:
         r = rel(proj, item['path'])
         if item.get('obsolete'):
@@ -546,10 +676,17 @@ def cmd_sync(args):
             continue
         removes += len(item['removes'])
         detail = f" · bajas: {', '.join(item['removes'][:20])}{' …' if len(item['removes']) > 20 else ''}" if item['removes'] else ''
+        if item['restyled']:
+            restyled += 1
+        if item['format_only']:
+            detail = ' · solo formato (mismos datos; se reescribe con el formato de terms.py y se pierden comentarios y estilo)'
+        elif item['restyled']:
+            detail += ' · cambia también el formato (se reescribe con el de terms.py y se pierden comentarios y estilo)'
         tag = 'nuevo ' if item['new'] else ''
         print(f"{r}: {tag}+{len(item['adds'])} ~{len(item['changes'])} -{len(item['removes'])}{detail}")
     writes = [i for i in plan if not i.get('obsolete')]
     print(f'BAJAS={removes}')
+    print(f'CAMBIA_FORMATO={restyled}')
     d = dirty(proj, [i['path'] for i in writes])
     print(f"CAMBIOS_SIN_COMMITEAR={'desconocido (no es un repo git)' if d is None else (' '.join(d) or 'ninguno')}")
     new_langs = sorted({i['path'].parent.name for i in writes if i['new'] and not i['path'].parent.exists()})
@@ -561,7 +698,12 @@ def cmd_sync(args):
     if not args.get('apply'):
         print(f'MODO=dry-run ({len(writes)} ficheros; usa --apply con los mismos argumentos para escribirlos)')
         return 0
-    done = write_all(proj, [(i['path'], i['content']) for i in writes])
+    try:
+        done = write_all(proj, [(i['path'], i['content']) for i in writes])
+    except WriteError as e:
+        print(f'ESCRITOS={len(e.done)}')
+        print(f'ERROR_LOCAL={e}')
+        return 1
     print(f'ESCRITOS={len(done)}')
     return 0
 
@@ -598,6 +740,12 @@ def parse(argv):
     for key in need.get(args['cmd'], []):
         if key not in args:
             raise Abort(f"{args['cmd']} necesita --{key}" if key != 'text' else 'search necesita el texto')
+    for ns in ([args['ns']] if 'ns' in args else []) + args.get('include_ns', []):
+        if not NS_RE.fullmatch(ns):
+            raise Abort(f'namespace no válido: {ns!r} (minúsculas, números y guiones, como app o paper-catalog)')
+    if 'code' in args and not CODE_RE.fullmatch(args['code']):
+        raise Abort(f"code no válido: {args['code']!r} (el formato de la API: minúsculas, números, - y _ en "
+                    "segmentos separados por puntos, como global.save)")
     return args
 
 
@@ -615,6 +763,9 @@ def main(argv):
         return COMMANDS[args['cmd']](args)
     except Abort as e:
         print(f'ERROR={e}', file=sys.stderr)
+        return 1
+    except http.client.HTTPException as e:
+        print(f'ERROR=error de red: {type(e).__name__}: {e}', file=sys.stderr)
         return 1
     except (OSError, ValueError, KeyError, TypeError) as e:
         print(f'ERROR={type(e).__name__}: {e}', file=sys.stderr)

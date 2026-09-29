@@ -8,7 +8,7 @@ allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py token-stat
 
 Gestiona las traducciones (terms) del proyecto con la API de Terms: crear, actualizar, eliminar y buscar terms, y sincronizar los ficheros locales de i18n con la API, que es la fuente de verdad.
 
-Todo pasa por `terms.py`, que lee el token por su cuenta, pagina, aborta sin escribir ante cualquier error de la API y escribe los ficheros con el orden y el formato de los que ya hay en los proyectos (regenerar los actuales da bytes idénticos). No llamar a la API con curl ni generar los ficheros a mano. Sin `--apply`, ningún subcomando escribe nada: enseña lo que haría.
+Todo pasa por `terms.py`, que lee el token por su cuenta, pagina, aborta sin escribir ante cualquier error de la API y escribe los ficheros con el orden y el formato de grupodesa-front y grupodesa-backend, donde regenerar los actuales da bytes idénticos. En otros proyectos (grupodesa-api, gdapps) el formato cambia al reescribirlos y se pierden los comentarios, y el dry-run lo marca. Escribe cada fichero entero o lo deja como estaba, e ignora los directorios de idioma que no lo son, como `lang/vendor`. No llamar a la API con curl ni generar los ficheros a mano. Sin `--apply`, ningún subcomando escribe nada: enseña lo que haría.
 
 ## Paso 1: Detectar tipo de proyecto
 
@@ -54,7 +54,7 @@ Deducir la intención de `$ARGUMENTS`:
 
 ## Errores de la API
 
-`terms.py` aborta con `ERROR=` y no escribe nada, ni en la API ni en local. Los cambios locales se calculan antes de escribir en la API; si la API ya se ha escrito y falla la escritura local, lo dice aparte con `ERROR_LOCAL=`, y entonces hay que avisar al usuario de que la API sí quedó actualizada. Los errores de la API:
+`terms.py` aborta con `ERROR=` y no escribe nada, ni en la API ni en local. Los cambios locales se calculan antes de escribir en la API; si la API ya se ha escrito y falla la escritura local, lo dice aparte con `ERROR_LOCAL=`, con los ficheros que se escribieron y los que no, y entonces hay que avisar al usuario de que la API sí quedó actualizada. En sync, `ERROR_LOCAL=` dice lo mismo de los ficheros locales. Un `--ns` o un `--code` que no tengan el formato de la API (minúsculas, números, `-` y `_`, con puntos entre segmentos en el code) se rechazan antes de llamarla, y si la API devuelve un term distinto del pedido (no distingue mayúsculas), `terms.py` aborta sin usarlo. Los errores de la API:
 
 - **401**: token caducado o inválido → pedir uno nuevo con el procedimiento del Paso 2.
 - **403**: autenticado pero sin permisos de escritura → decírselo al usuario.
@@ -76,15 +76,15 @@ Imprime una tabla con una columna por idioma de `/locales` (`—` donde no hay t
 2. Comprobar si existe: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py find --ns {ns} --code {code}` (imprime el term o `NO_EXISTE`). Antes de crear uno nuevo, buscar también por el texto en español (`search`): si ya hay un `global.*` con el mismo valor y significado, mencionarlo en el resultado, sin bloquear la creación.
 3. Escribir los valores con Write en un fichero JSON (`{"es": "…", "fr": "…"}`), solo con idiomas de `/locales`, en el directorio que da `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py workdir`. Por defecto, los idiomas que ha dado el usuario; `upsert` avisa con `SIN_TRADUCCION` de los que faltan. Si el `CLAUDE.md` del proyecto pide traducir a todos los idiomas de `/locales`, proponer los que falten: son traducciones del modelo y requieren la confirmación del paso 6. Nunca cadenas vacías. Variantes: `es` es español de España y `pt`, portugués de Portugal.
 4. Revisar la ortografía de `es` (sección «Ortografía»). Si se corrige el texto que ha dado el usuario, cuenta para la confirmación del paso 6.
-5. Dry-run: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py upsert --ns {ns} --code {code} --values {fichero}`. Enseña, por idioma, el valor actual, el nuevo y si es nuevo o sobrescribe, y en `LOCAL` los ficheros que tocaría. Con un namespace propio de Laravel se niega; con uno que no existe en local, lo deja solo en la API y lo avisa.
+5. Dry-run: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py upsert --ns {ns} --code {code} --values {fichero}`. Enseña, por idioma, el valor actual, el nuevo y si es nuevo o sobrescribe, y en `LOCAL` los ficheros que tocaría. Con un namespace propio de Laravel se niega. Con uno que no existe en local, lo deja solo en la API y lo avisa. Con `NAMESPACE_AJENO`, un namespace local con claves y ninguna en la API, también se niega: escribirlo haría que el siguiente sync propusiera dar de baja todas las demás claves locales.
 6. **Pedir confirmación** antes de `--apply` si se sobrescribe algún valor, si hay traducciones propuestas por el modelo o si se ha corregido la ortografía del texto del usuario. En ese caso, enseñar la tabla del dry-run y decir de dónde sale cada valor. Si el usuario ha dado todos los valores de un term nuevo, basta con enseñar el resultado.
-7. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py upsert --ns {ns} --code {code} --values {fichero} --apply`. Envía el objeto completo (lo actual fusionado con lo nuevo) y actualiza los ficheros locales de cada idioma con valor. No se sabe si la API fusiona o reemplaza `value`, así que no se promete que omitir un idioma lo borre.
+7. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py upsert --ns {ns} --code {code} --values {fichero} --apply`. Envía el objeto completo (lo actual fusionado con lo nuevo) y actualiza los ficheros locales de cada idioma con valor. La API sustituye `value` entero, así que se envían también los idiomas del term que no están en `/locales` (el `AVISO` dice que se conservan) y no se escriben en local.
 
 Si sale `AVISO=idioma nuevo …`, decirle al usuario que registre el idioma en `packages/i18n/src/index.js` (import, resources y supportedLngs) y en la configuración de i18n de web y mobile.
 
 ## Flujo: Eliminar un term
 
-1. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py delete --ns {ns} --code {code}`: enseña el id y los valores actuales, sin borrar.
+1. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py delete --ns {ns} --code {code}`: enseña el namespace, el code, el id y los valores actuales, sin borrar. Con `NAMESPACE_AJENO` se niega: el term es del proyecto que usa el namespace de la API.
 2. Confirmar con el usuario, enseñando code y valores.
 3. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py delete --ns {ns} --code {code} --apply`: lo borra de la API (soft delete) y quita la clave de los ficheros locales de todos los idiomas.
 
@@ -94,14 +94,15 @@ Requiere estar en un proyecto. La API es la fuente de verdad: el contenido de ca
 
 1. Dry-run: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py sync`. Imprime, por fichero, altas, cambios y bajas (`+N ~N -N`, con las claves que se darían de baja), y además:
    - `BAJAS`: número de claves que desaparecerían;
+   - `CAMBIA_FORMATO`: ficheros que se reescribirían con otro formato y perderían sus comentarios, con o sin cambios de datos (en la línea del fichero, «solo formato» o «cambia también el formato»);
    - `CAMBIOS_SIN_COMMITEAR`: ficheros de idioma con cambios en git que el sync sobrescribiría;
    - `NAMESPACE_AJENO`: namespaces locales que se llaman como uno de la API pero no comparten ninguna clave con él (p. ej. el `app` propio de gdapps frente al `app` de grupodesa); no se tocan;
    - `OBSOLETO`: ficheros de un idioma sin terms en la API; no se borran;
    - `SIN_TERMS_EN_API`: namespaces locales que la API no gestiona; no se tocan;
    - `SOLO_EN_API`: namespaces de la API que no existen en local;
    - `IDIOMAS_NUEVOS`.
-2. Si `BAJAS=0` y `CAMBIOS_SIN_COMMITEAR=ninguno`, aplicar directamente. Si hay bajas o cambios sin commitear, enseñárselos al usuario y pedir confirmación: pueden ser trabajo local sin subir, o terms borrados en la API por error.
-3. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py sync --apply`, con los mismos argumentos que el dry-run que se ha revisado. Para crear en local un namespace de `SOLO_EN_API`, o sustituir uno de `NAMESPACE_AJENO`, añadir `--include-ns {ns}` solo si el usuario lo pide, y volver a hacer antes el dry-run con ese flag y aplicarle la regla del paso 2. En frontend solo existe el namespace `app`.
+2. Si `BAJAS=0`, `CAMBIA_FORMATO=0` y `CAMBIOS_SIN_COMMITEAR=ninguno`, aplicar directamente. Si no, enseñárselo al usuario y pedir confirmación: las bajas y los cambios sin commitear pueden ser trabajo local sin subir o terms borrados en la API por error, y un cambio de formato reescribe ficheros que el proyecto mantiene con otro estilo.
+3. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py sync --apply`, con los mismos argumentos que el dry-run que se ha revisado. Para crear en local un namespace de `SOLO_EN_API`, o sustituir uno de `NAMESPACE_AJENO`, añadir `--include-ns {ns}` solo si el usuario lo pide, y volver a hacer antes el dry-run con ese flag y aplicarle la regla del paso 2. `--include-ns` no admite los namespaces propios de Laravel. En frontend solo existe el namespace `app`.
 4. Resumen al usuario: ficheros escritos, idiomas y avisos. Si hay `IDIOMAS_NUEVOS` en frontend, recordar registrarlos en `packages/i18n/src/index.js`.
 
 ## Referencia de la API

@@ -52,7 +52,7 @@ Ejemplos reales de las que valieron una tarde cada una:
 - *¿este valor es una columna o un accesor?* — sumar un accesor sobre `stdClass` devuelve **0 en silencio**
 - *¿este código se llega a ejecutar?* — una rama `never executed` en el plan de consulta
 
-**[T-4] La comprobación descalificante va SIEMPRE delante del trabajo ancho.** Ordenar barato → caro no es una preferencia de estilo: es lo único que evita pagar el análisis de algo ya muerto.
+**[T-4] La comprobación descalificante va siempre delante del trabajo ancho.** Ordenar barato → caro no es una preferencia de estilo: es lo único que evita pagar el análisis de algo ya muerto.
 
 ## Paso 4: Presupuesto declarado
 
@@ -68,7 +68,7 @@ Presupuesto: {N} agentes · ~{M} min · {K} mediciones. Nivel {1|2|3}.
 | **2 — acotado** | ≤3 agentes en total, ~10 min | el ancho es el cuello de botella de verdad: varios dominios o ficheros sin relación |
 | **3 — fan-out** | ≤8 agentes en total, con veto del usuario | sólo tras el Paso 3 y con el premio del Paso 2 ya cuantificado |
 
-**[T-5] El tope es TOTAL, no por rama.** Un `slice(0, 6)` sobre 4 ramas son 24 agentes. Contar el producto, no el factor.
+**[T-5] El tope es el total, no el de cada rama.** Un `slice(0, 6)` sobre 4 ramas son 24 agentes. Contar el producto, no el factor.
 
 **[T-6] Un adversario vale más que seis confirmadores.** Para validar una conclusión, un agente que busque el contraejemplo bate a N que la comprueben. Los N convergen en lo mismo y no aportan información nueva.
 
@@ -79,7 +79,8 @@ Presupuesto: {N} agentes · ~{M} min · {K} mediciones. Nivel {1|2|3}.
 **Encargo de cada agente** (niveles 2 y 3). Un subagente no ve esta skill ni sus `[T-N]`, así que lo que no se le pida no lo hará. El encargo lleva:
 - la pregunta concreta y la regla de paro;
 - qué devolver: cada número con el comando exacto que lo produjo y su salida, porque sin el cómo se descarta (Límites);
-- el tipo `Explore`, que no tiene Edit, Write ni la herramienta de agentes. Así cumple [T-8] y no puede lanzar los suyos: un subagente puede abrir otros hasta tres niveles por debajo, y cada uno cuenta para el tope total de [T-5].
+- el tipo `Explore`, que no tiene Edit, Write ni la herramienta de agentes. Así cumple [T-8] y no puede lanzar los suyos: un subagente puede abrir otros hasta tres niveles por debajo, y cada uno cuenta para el tope total de [T-5];
+- que solo mida en local y sin tocar una base de datos. `Explore` tiene Bash y no puede pedir la confirmación del párrafo siguiente, así que cualquier otra medición la devuelve como comando propuesto, con su entorno, y la lanza el agente principal cuando el usuario la confirme. Si la medición es un `EXPLAIN ANALYZE`, recordarle que ejecuta la sentencia de verdad (Paso 5).
 
 El adversario de [T-6] recibe la conclusión y los datos, no el razonamiento que la sostiene: si lo recibe, deja de ser independiente.
 
@@ -92,7 +93,7 @@ Sólo para el tipo B. Es la sección que más veces se ha incumplido.
 **[T-9] Prohibido presentar una resta como medición.** «El total menos la latencia media» no es un dato. Medir el tiempo del lado del servidor:
 
 - BD → `EXPLAIN ANALYZE` (inmune a la red). Ojo: **ejecuta la sentencia de verdad**. Si basta con el plan, `EXPLAIN` a secas. Sobre una escritura, solo dentro de `BEGIN … ROLLBACK`, que ni así deshace las secuencias ni el DDL de MySQL. Contra producción, una consulta pesada se paga entera
-- HTTP → tiempo de servidor ≈ `%{time_starttransfer}` − `%{time_pretransfer}` de `curl -w`; en remoto aún incluye 1 RTT, que se cancela en el A/B de [T-11]. No usar `%{time_appconnect}`: sin TLS vale 0. Si la respuesta trae `Server-Timing`, mejor esa. Imprimir `%{http_code}` en cada muestra: una sola que no sea 2xx invalida la medición
+- HTTP → tiempo de servidor ≈ `%{time_starttransfer}` − `%{time_pretransfer}` de `curl -w`; en remoto aún incluye 1 RTT, que se cancela en el A/B de [T-11]. No usar `%{time_appconnect}`: sin TLS vale 0. Si la respuesta trae `Server-Timing`, mejor esa. Imprimir `%{http_code}` en cada muestra: una sola con un código distinto del esperado (2xx, salvo al aislar capas) invalida la medición
 - capas → aislar por códigos: 404 (routing) → 401 (auth) → 200 (controlador)
 - trabajo de ida y vuelta → **número de consultas**, que es determinista, en vez de ms
 - frontend → número de peticiones y de renders, también deterministas, con la herramienta que indique el `CLAUDE.md` del proyecto
@@ -149,7 +150,7 @@ Declararla antes de empezar: **qué resultado concreto hace abandonar**. Y cumpl
 
 Encaminar explícitamente:
 
-- **`/desa:plan`** — merece la pena y hay que planificarlo. Dar la invocación lista para pegar, con lo ya cerrado, para que el plan no vuelva a explorarlo: `/desa:plan {petición acotada}. Premio: {…}. Descartado: {…}; no volver a explorarlo.`
+- **`/desa:plan`** — merece la pena y hay que planificarlo. Dar la invocación lista para pegar, con lo ya cerrado, para que el plan no vuelva a explorarlo: `/desa:plan {petición acotada}. Premio: {…}. Medido: {…}. Regla de paro: {…}. Descartado: {…}; no volver a explorarlo.`
 - **arreglo directo** — una o dos líneas con el premio ya medido; proponer el diff, no planificar
 - **no vale la pena** — con el número que lo demuestra
 - **bloqueado** — falta un instrumento o una decisión de negocio; decir exactamente cuál

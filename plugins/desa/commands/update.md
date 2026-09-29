@@ -10,31 +10,44 @@ Actualiza el plugin Desa a la última versión publicada y dice qué ha cambiado
 
 ## Pasos
 
-1. Anotar lo que hay instalado: `version` de la entrada `desa@desa` en
+1. Anotar:
+    - la versión que tiene cargada esta sesión: el último directorio de `${CLAUDE_PLUGIN_ROOT}`;
+    - la instalada: `version` de la entrada `desa@desa` en
+
+        ```bash
+        claude plugin list --json
+        ```
+
+    - el `gitCommitSha` de `desa@desa` en `~/.claude/plugins/installed_plugins.json`, y el `installLocation` de `desa` en `~/.claude/plugins/known_marketplaces.json`, que es el clon del marketplace (normalmente `~/.claude/plugins/marketplaces/desa`).
+
+2. Comprobar que el clon del marketplace no tiene trabajo sin subir:
 
     ```bash
-    claude plugin list --json
+    git -C {installLocation} status --porcelain
+    git -C {installLocation} log --oneline @{u}..HEAD
     ```
 
-    Anotar también el `gitCommitSha` de `desa@desa` en `~/.claude/plugins/installed_plugins.json`, y el `installLocation` de `desa` en `~/.claude/plugins/known_marketplaces.json`, que es el clon del marketplace (normalmente `~/.claude/plugins/marketplaces/desa`).
+    Si alguna devuelve algo, parar y enseñárselo al usuario: si el `git pull` del paso 3 falla, Claude Code aparta el clon, lo vuelve a clonar y borra ese trabajo sin avisar, y el comando sale bien. Que lo suba o lo guarde antes de actualizar.
 
-2. Refrescar el marketplace:
+3. Refrescar el marketplace:
 
     ```bash
     claude plugin marketplace update desa
     ```
 
-3. Actualizar el plugin:
+4. Actualizar el plugin:
 
     ```bash
     claude plugin update desa@desa
     ```
 
-4. Volver a ejecutar `claude plugin list --json` y comparar la versión con la del paso 1.
+5. Volver a ejecutar `claude plugin list --json` y comparar la versión con la del paso 1.
 
-Si algún comando falla, parar ahí: enseñar el error y no decir que el plugin se ha actualizado. Las causas habituales son tres: no hay red; hay cambios locales en el clon del marketplace (`installLocation`); o `claude` no está en el PATH del Bash tool, p. ej. si solo se usa la app de escritorio.
+Si algún comando falla, parar ahí: enseñar el error y no decir que el plugin se ha actualizado. Las causas habituales son dos: no hay red, o `claude` no está en el PATH del Bash tool, p. ej. si solo se usa la app de escritorio.
+
+Las órdenes `git -C …` no están preaprobadas, porque la ruta y el commit cambian de una máquina a otra, y pedirán permiso. La lectura del `CHANGELOG.md` solo está preaprobada en la ruta habitual del clon.
 
 ## Qué decir al usuario
 
-- **Versión nueva**: «Plugin Desa actualizado de X a Y.» Después, como mucho una línea por cada versión posterior a X, sacada del `CHANGELOG.md` de `installLocation`. Si falta alguna entrada, listar en su lugar `git -C {installLocation} log --oneline {gitCommitSha del paso 1}..HEAD -- plugins/desa`. Terminar con: «Ejecuta `/reload-plugins` (si avisa por la caché del prompt, `/reload-plugins --force`) o reinicia la sesión; hasta entonces, esta sesión sigue con las skills de la versión anterior.» Es una indicación para el usuario: el modelo no puede ejecutarlo.
-- **Misma versión**: «Ya tenías la última versión (X).» Si `git -C {installLocation} log --oneline {gitCommitSha}..HEAD -- plugins/desa` muestra commits, explicar que se publicaron cambios sin subir `version` en `plugin.json` y ofrecer el procedimiento del README (borrar `~/.claude/plugins/cache/desa` y reinstalar). No ejecutarlo sin confirmación.
+- **Versión nueva**: «Plugin Desa actualizado de X a Y.» Después, como mucho una línea por cada versión posterior a X, sacada del `CHANGELOG.md` de `installLocation`. Si falta alguna entrada, listar en su lugar `git -C {installLocation} log --oneline {gitCommitSha del paso 1}..@{u} -- plugins/desa`; si git no encuentra ese commit (el clon se rehízo con poca profundidad), decir que no se puede listar. Terminar con: «Ejecuta `/reload-plugins` (si avisa por la caché del prompt, `/reload-plugins --force`) o reinicia la sesión; hasta entonces, esta sesión sigue con las skills de la versión anterior.» Es una indicación para el usuario: el modelo no puede ejecutarlo.
+- **Misma versión**: «Ya tenías la última versión (X).» Si la versión cargada en la sesión (paso 1) es otra, añadir que esta sesión sigue con esa y dar la misma indicación de `/reload-plugins`. Si `git -C {installLocation} log --oneline {gitCommitSha}..@{u} -- plugins/desa` muestra commits, explicar que se publicaron cambios sin subir `version` en `plugin.json` y ofrecer el procedimiento del README (borrar `~/.claude/plugins/cache/desa` y reinstalar). No ejecutarlo sin confirmación.

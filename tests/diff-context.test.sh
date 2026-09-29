@@ -396,6 +396,60 @@ git checkout -q --detach "$MAIN_SHA"
 PATH="$ROOT/bin2:$PATH" run --pr 7
 expect "pr: otro commit" "PR_EN_WORKTREE=no"
 
+# PR: la base es el commit que da GitHub (baseRefOid), no un origin/{base} desactualizado
+new_repo pr-base "${MONO[@]}"
+OLD_MAIN=$(git rev-parse HEAD)
+echo ajeno > packages/core/otro.js && git add -A && git commit -qm "commit ajeno en main"
+NEW_MAIN=$(git rev-parse HEAD)
+git checkout -qb feat && echo y >> apps/web/src/a.js && git commit -qam feat
+FEAT_SHA=$(git rev-parse HEAD)
+mkdir -p "$ROOT/bin3"
+cat > "$ROOT/bin3/gh" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+  "pr diff 9 --name-only") echo apps/web/src/a.js ;;
+  *headRefOid*) echo "$FEAT_SHA" ;;
+  *baseRefName*) echo main ;;
+  *baseRefOid*) cat "$ROOT/pr-base-oid" ;;
+esac
+EOF
+chmod +x "$ROOT/bin3/gh"
+echo "$NEW_MAIN" > "$ROOT/pr-base-oid"
+git update-ref refs/remotes/origin/main "$NEW_MAIN"
+PATH="$ROOT/bin3:$PATH" run --pr 9
+expect "pr con origin al día: base" "PR_BASE=origin/main"
+if printf '%s\n' "$OUT" | grep -q '^AVISO='; then ko "pr con origin al día no avisa"; else ok; fi
+git update-ref refs/remotes/origin/main "$OLD_MAIN"
+PATH="$ROOT/bin3:$PATH" run --pr 9
+expect "pr con origin desactualizado: base de GitHub" "PR_BASE=$NEW_MAIN"
+expect "pr con origin desactualizado: aviso" "AVISO=origin/main no coincide con la base actual de la PR; se usa la de GitHub (${NEW_MAIN:0:12})"
+u0=$(bash -c "$(field DIFF_U0)" 2>/dev/null)
+if printf '%s\n' "$u0" | grep -q 'otro.js'; then ko "pr con origin desactualizado: DIFF_U0 mete el commit ajeno"; else ok; fi
+echo 0123456789abcdef0123456789abcdef01234567 > "$ROOT/pr-base-oid"
+PATH="$ROOT/bin3:$PATH" run --pr 9
+expect "pr sin la base en local: sin PR_BASE" "DIFF_U0="
+expect_no "pr sin la base en local: no da PR_BASE" "PR_BASE=origin/main"
+expect "pr sin la base en local: aviso" "AVISO=la base de la PR (0123456789ab) no está en local, así que no hay DIFF_U0 (git fetch origin main)"
+
+# PR en un clon superficial del merge commit: no se puede comprobar, y se dice
+git checkout -q main && git update-ref refs/remotes/origin/main "$NEW_MAIN"
+git merge -q --no-ff feat -m "Merge feat"
+git clone -q --depth 1 "file://$ROOT/pr-base" "$ROOT/pr-shallow" && cd "$ROOT/pr-shallow" || exit 1
+PATH="$ROOT/bin3:$PATH" run --pr 9
+expect "pr en clon superficial: no en worktree" "PR_EN_WORKTREE=no"
+expect "pr en clon superficial: aviso" "AVISO=clon superficial: no se puede comprobar si HEAD es el merge commit de la PR (en GitHub Actions, actions/checkout con fetch-depth: 2 o más)"
+
+# --path avisa de los cambios sin commitear de fuera de la ruta
+new_repo path-fuera "${MONO[@]}" apps/web/src/b.js
+git checkout -qb feat && echo y >> apps/web/src/a.js && git commit -qam feat
+echo z >> apps/web/src/b.js && echo n > apps/web/src/nuevo.js
+run --path apps/web/src/a.js
+expect "path con árbol sucio fuera: fuente" "FUENTE=rama:main...HEAD"
+expect "path con árbol sucio fuera: aviso" "AVISO=hay 2 ficheros con cambios sin commitear fuera de apps/web/src/a.js, que los tests del Paso 6 también verán"
+git checkout -q -- apps/web/src/b.js && rm apps/web/src/nuevo.js
+run --path apps/web/src/a.js
+if printf '%s\n' "$OUT" | grep -q '^AVISO='; then ko "path con árbol limpio no avisa"; else ok; fi
+
 run --otra
 expect_code "argumento no reconocido" 64
 

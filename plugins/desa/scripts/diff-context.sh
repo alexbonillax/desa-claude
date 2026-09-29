@@ -98,6 +98,19 @@ read_names() {
   done < "$TMP"
 }
 
+# Entradas de git status en todo el árbol, sin contar las de herramientas sin trackear.
+dirty_total() {
+  local entry xy p n=0
+  g status --porcelain=v1 -z --untracked-files=all > "$TMP" 2>/dev/null || { echo 0; return; }
+  while IFS= read -r -d '' entry; do
+    xy=${entry:0:2}; p=${entry:3}
+    case "$xy" in R*|C*) IFS= read -r -d '' p ;; esac
+    [ "$xy" = "??" ] && is_tool "${entry:3}" && continue
+    n=$((n + 1))
+  done < "$TMP"
+  echo "$n"
+}
+
 resolve_rel() {
   local t=$1 d rest abs
   case "$t" in /*) ;; *) t="$ORIG/$t" ;; esac
@@ -145,14 +158,29 @@ if [ "$MODE" = pr ]; then
   DIFF="gh pr diff $N"
   HEAD_PR=$(gh pr view "$N" --json headRefOid -q .headRefOid 2>/dev/null)
   BASE_REF=$(gh pr view "$N" --json baseRefName -q .baseRefName 2>/dev/null)
+  BASE_OID=$(gh pr view "$N" --json baseRefOid -q .baseRefOid 2>/dev/null)
   read_status
   HEAD_NOW=$(git rev-parse HEAD 2>/dev/null)
   if [ -n "$HEAD_PR" ] && [ -z "$STAGED$UNSTAGED" ] && [ "$HEAD_NOW" = "$HEAD_PR" ]; then
     PR_OK=si
-    if [ -n "$BASE_REF" ] && git rev-parse --verify -q "origin/$BASE_REF^{commit}" >/dev/null; then
+    # La base es el commit de la base que ve GitHub: con origin/{base} desactualizado, el
+    # merge-base sería antiguo y DIFF_U0 metería commits ajenos a la PR.
+    ORIGIN_OID=""
+    [ -n "$BASE_REF" ] && ORIGIN_OID=$(git rev-parse --verify -q "origin/$BASE_REF^{commit}" 2>/dev/null)
+    if [ -n "$BASE_OID" ] && [ "$ORIGIN_OID" = "$BASE_OID" ]; then
       PR_BASE="origin/$BASE_REF"
-      DIFF_U0="git diff --unified=0 $PR_BASE...HEAD"
+    elif [ -n "$BASE_OID" ] && git cat-file -e "$BASE_OID^{commit}" 2>/dev/null; then
+      PR_BASE=$BASE_OID
+      [ -n "$ORIGIN_OID" ] && WARN="origin/$BASE_REF no coincide con la base actual de la PR; se usa la de GitHub (${BASE_OID:0:12})"
+    elif [ -n "$BASE_OID" ]; then
+      WARN="la base de la PR (${BASE_OID:0:12}) no está en local, así que no hay DIFF_U0 (git fetch origin ${BASE_REF:-su rama base})"
+    elif [ -n "$ORIGIN_OID" ]; then
+      PR_BASE="origin/$BASE_REF"
+      WARN="gh no ha dado la base de la PR: no se ha comprobado que origin/$BASE_REF esté al día"
+    else
+      WARN="sin la base de la PR en local no hay DIFF_U0 (git fetch origin ${BASE_REF:-su rama base})"
     fi
+    [ -n "$PR_BASE" ] && DIFF_U0="git diff --unified=0 $PR_BASE...HEAD"
   elif [ -n "$HEAD_PR" ] && [ -z "$STAGED$UNSTAGED" ] && [ "$(git rev-parse -q --verify HEAD^2 2>/dev/null)" = "$HEAD_PR" ]; then
     # checkout de GitHub Actions en pull_request: HEAD es el merge de la PR sobre su base.
     PR_OK=si
@@ -161,6 +189,10 @@ if [ "$MODE" = pr ]; then
     WARN="HEAD es el merge commit de la PR sobre su base (checkout de GitHub Actions)"
   else
     PR_OK=no
+    if [ -n "$HEAD_PR" ] && [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = true ] \
+       && ! git rev-parse -q --verify HEAD^2 >/dev/null 2>&1; then
+      WARN="clon superficial: no se puede comprobar si HEAD es el merge commit de la PR (en GitHub Actions, actions/checkout con fetch-depth: 2 o más)"
+    fi
   fi
   if [ "$PR_OK" = si ] && [ -n "$UNTRACKED" ]; then
     WARN="${WARN:+$WARN; }hay $(printf '%s' "$UNTRACKED" | grep -c .) ficheros sin trackear en el working tree; pueden afectar a los tests de la PR"
@@ -181,6 +213,7 @@ else
   fi
 
   read_status ${PS[@]+"${PS[@]}"}
+  IN_PATH=$(printf '%s%s%s' "$STAGED" "$UNSTAGED" "$UNTRACKED" | grep . | sort -u | grep -c .)
 
   if [ -n "$STAGED" ]; then
     FUENTE=staged
@@ -224,6 +257,10 @@ else
       DIFF_U0="git show --unified=0 HEAD$PSTXT"
     fi
     [ -z "$FILES" ] && FUENTE=ninguna && DIFF="" && DIFF_U0=""
+  fi
+  if [ "$MODE" = path ]; then
+    OUT_PATH=$(( $(dirty_total) - IN_PATH ))
+    [ "$OUT_PATH" -gt 0 ] && WARN="${WARN:+$WARN; }hay $OUT_PATH ficheros con cambios sin commitear fuera de $REL, que los tests del Paso 6 también verán"
   fi
 fi
 

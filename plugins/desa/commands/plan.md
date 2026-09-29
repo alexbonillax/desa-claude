@@ -12,7 +12,7 @@ Si `$ARGUMENTS` está vacío, pedir al usuario la descripción de la tarea y ter
 
 **Plan mode.** El plan se aprueba con `ExitPlanMode`, y el fichero del plan solo tiene ruta asignada en plan mode. Si el system reminder no indica plan mode, llamar a `EnterPlanMode` antes del Paso 3. Si no está disponible o el usuario prefiere no usarlo, entregar el plan en el chat sin escribir ficheros, y terminar ahí.
 
-**Si viene de `/desa:triage`**, lo que el triage dejó cerrado no se vuelve a explorar: su comprobación descalificante ya está respondida y lo descartado sigue descartado. Llevar al Context del plan su «Medido» y su regla de paro. Si la petición es un síntoma o una decisión y no hay triage previo, sugerir `/desa:triage` en una línea y seguir.
+**Si viene de `/desa:triage`**, lo que el triage dejó cerrado no se vuelve a explorar: su comprobación descalificante ya está respondida y lo descartado sigue descartado. Llevar al Context del plan su «Medido» y su regla de paro, si vienen en la invocación o siguen en el contexto; si no, dejarlos fuera y decirlo, sin reconstruirlos. Si la petición es un síntoma o una decisión y no hay triage previo, sugerir `/desa:triage` en una línea y seguir.
 
 ## Paso 1: Detectar tipo de proyecto
 
@@ -22,7 +22,7 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/diff-context.sh --repo
 
 - `REPO=backend` → backend.
 - `REPO=websites` → websites.
-- `REPO=monorepo` → frontend, mobile o los dos según la tarea (`APPS` dice qué apps existen). `apps/mobile/` es mobile y el resto (`apps/web/`, `packages/`) frontend, igual que en `/desa:review`: una tarea de mobile que añade un hook en `packages/core` lleva las dos secciones. Si `$ARGUMENTS` no lo deja claro, cargar las dos en el Paso 2 y quedarse con las que correspondan al redactar el borrador, cuando la exploración lo aclare.
+- `REPO=monorepo` → frontend, mobile o los dos según la tarea (`APPS` dice qué apps existen). `apps/mobile/` es mobile y el resto (`apps/web/`, `packages/`) frontend, igual que en `/desa:review`: una tarea de mobile que añade un hook en `packages/core` lleva los dos ficheros de criterios, el de frontend y el de mobile. Si `$ARGUMENTS` no lo deja claro, cargar los dos en el Paso 2 y quedarse con los que correspondan al redactar el borrador, cuando la exploración lo aclare.
 - `REPO=unknown` o `ERROR` → informar al usuario y terminar.
 
 El tipo sale del repositorio y de la tarea, no del diff: al planificar, los cambios de la tarea aún no existen y lo que haya en el árbol es otro trabajo.
@@ -105,7 +105,7 @@ Escribir el plan consolidado en la ruta que el sistema de plan mode haya asignad
 - Edge cases específicos a validar manualmente
 
 ## Reglas aplicadas
-Lista de los #N de review.md más relevantes que el plan ya respeta (trazabilidad).
+Lista de los #N de los criterios de `/desa:review` (`references/criterios-*.md`) más relevantes que el plan ya respeta (trazabilidad).
 ```
 
 ## Paso 7: Salir con ExitPlanMode
