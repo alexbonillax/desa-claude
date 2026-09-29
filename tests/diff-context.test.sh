@@ -42,6 +42,8 @@ expect_diff_runs() {
   if command -v zsh >/dev/null; then
     n=$(zsh -c "$cmd" 2>/dev/null | wc -l | tr -d ' ')
     if [ "${n:-0}" -gt 0 ]; then ok; else ko "$1: DIFF vacío o roto en zsh: $cmd"; fi
+  elif [ -n "${REQUIRE_ZSH:-}" ]; then
+    ko "$1: no hay zsh y REQUIRE_ZSH pide probar también ahí"
   fi
 }
 

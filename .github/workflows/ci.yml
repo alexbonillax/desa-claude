@@ -16,7 +16,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      # zsh es el shell del Bash tool en los Macs del equipo: las órdenes DIFF se prueban también ahí.
+      - name: Instalar zsh
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh
+
       - name: Pruebas de los scripts del plugin
+        env:
+          REQUIRE_ZSH: "1"
         run: |
           bash tests/diff-context.test.sh
           bash tests/test-context.test.sh
