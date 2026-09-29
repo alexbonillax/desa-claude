@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # zsh es el shell del Bash tool en los Macs del equipo: las órdenes DIFF se prueban también ahí.
+      - name: Instalar zsh
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh
+
+      - name: Pruebas de los scripts del plugin
+        env:
+          REQUIRE_ZSH: "1"
+        run: |
+          bash tests/diff-context.test.sh
+          bash tests/test-context.test.sh
+          python3 -m unittest discover -s tests
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: claude plugin validate
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude plugin validate --strict .
+          claude plugin validate --strict plugins/desa
+
+      - name: La versión sube si cambia el plugin
+        if: github.event_name == 'pull_request'
+        run: |
+          base="origin/${{ github.base_ref }}"
+          if git diff --quiet "$base"...HEAD -- plugins/desa; then
+            echo "plugins/desa no cambia en esta PR"
+            exit 0
+          fi
+          version() { python3 -c 'import json, sys; print(json.load(sys.stdin)["version"])'; }
+          old=$(git show "$base:plugins/desa/.claude-plugin/plugin.json" | version)
+          new=$(version < plugins/desa/.claude-plugin/plugin.json)
+          if [ "$old" = "$new" ]; then
+            echo "::error file=plugins/desa/.claude-plugin/plugin.json::plugins/desa ha cambiado y la versión sigue en $new. Súbela: sin versión nueva, claude plugin update no instala nada."
+            exit 1
+          fi
+          if ! grep -q "^## \[$new\]" CHANGELOG.md; then
+            echo "::error file=CHANGELOG.md::falta la entrada [$new] en CHANGELOG.md"
+            exit 1
+          fi
+          echo "versión $old → $new, con entrada en el CHANGELOG"
+
+      - name: Aviso de allowed-tools amplios
+        run: |
+          pattern='Bash\((python3|python|php|node|npx|curl|wget|claude|git|gh|bash|sh)(:\*| \*| (diff|log|show|status|pr):\*)\)'
+          grep -nE "^allowed-tools:.*$pattern" plugins/desa/commands/*.md | while IFS=: read -r file line _; do
+            echo "::warning file=$file,line=$line::allowed-tools preaprueba un intérprete, red o git/gh completos (ver «Mantenimiento» en el README)"
+          done

@@ -1,425 +1,139 @@
 ---
-description: Gestionar traducciones (terms) vía API y sincronizar archivos locales
+description: Gestionar las traducciones (terms) de Grupo Desa en la API y sincronizar los ficheros de idioma locales. Usar cuando hay que crear, cambiar, buscar o borrar un texto traducible, o sincronizar los ficheros con la API, y cuando el CLAUDE.md del proyecto manda pasar las traducciones por aquí
 argument-hint: [crear term, sincronizar, buscar texto]
-allowed-tools: Bash(curl:*), Bash(python3:*)
+allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py token-status), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py workdir), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py project), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py locales), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py find:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py search:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py sync), Read(/${CLAUDE_PLUGIN_ROOT}/references/ortografia.md)
 ---
 
 # Translations — Gestión de traducciones de Grupo Desa
 
-Gestionas las traducciones (terms) del proyecto vía la API de Terms. Puedes crear, actualizar, eliminar y buscar traducciones, y sincronizar los archivos locales de i18n con la API (fuente de verdad).
+Gestiona las traducciones (terms) del proyecto con la API de Terms: crear, actualizar, eliminar y buscar terms, y sincronizar los ficheros locales de i18n con la API, que es la fuente de verdad.
+
+Todo pasa por `terms.py`, que lee el token por su cuenta, pagina, aborta sin escribir ante cualquier error de la API y escribe los ficheros con el orden y el formato de grupodesa-front y grupodesa-backend, donde regenerar los actuales da bytes idénticos. En otros proyectos (grupodesa-api, gdapps) el formato cambia al reescribirlos y se pierden los comentarios, y el dry-run lo marca. Escribe cada fichero entero o lo deja como estaba, e ignora los directorios de idioma que no lo son, como `lang/vendor`. No llamar a la API con curl ni generar los ficheros a mano. Sin `--apply`, ningún subcomando escribe nada: enseña lo que haría.
 
 ## Paso 1: Detectar tipo de proyecto
 
-Desde el directorio de trabajo actual:
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py project
+```
+
+- `PROYECTO=frontend`: namespace siempre `app`, ficheros en `packages/i18n/src/locales/{lang}/translations.json`.
+- `PROYECTO=backend`: un fichero por namespace en `resources/lang/{lang}/` (o `lang/{lang}/`). `NAMESPACES` son los que hay en local, sin los propios de Laravel (`auth`, `validation`, `passwords`, `pagination`, `errors`), que no vienen de la API y no se tocan nunca: sobrescribirlos borraría los mensajes del framework.
+- `PROYECTO=no-project`: solo API. Se pueden crear, actualizar, eliminar y buscar terms, pero no sincronizar ficheros. Decírselo al usuario.
+
+La raíz es la del repositorio git, así que da igual desde qué subdirectorio se ejecute. Los idiomas salen siempre de la API (`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py locales`), nunca escritos a mano.
+
+## Paso 2: Token
 
 ```bash
-if [ -d packages/i18n/src/locales ]; then echo "frontend"; elif [ -d resources/lang ]; then echo "backend"; else echo "no-project"; fi
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py token-status
 ```
 
-Comportamiento según resultado:
+- `OK …` → seguir. El token lo lee el script: no imprimirlo, no ponerlo en ningún comando y no pedirlo si ya hay uno. El que ya estuviera en la clave `desa_wiki_token` de `~/.claude/settings.json` sigue valiendo.
+- `NO_TOKEN`, `TOKEN_INVALIDO` o un 401 más adelante → pedir al usuario que copie su token de la API al portapapeles y lo guarde con esta orden en la propia sesión. El `!` delante hace que el token no pase por la conversación:
 
-- **frontend**: Namespace siempre `app`. Archivos en `packages/i18n/src/locales/{lang}/translations.json`
-- **backend**: Múltiples namespaces (app, export, notifications, paper-catalog). Archivos en `resources/lang/{lang}/{namespace}.php`. **NUNCA modificar**: auth.php, validation.php, passwords.php, pagination.php, errors.php
-- **no-project**: Modo API-only. Puedes crear/actualizar/eliminar/buscar terms, pero no sincronizar archivos locales. Informa al usuario
+  ```
+  ! pbpaste | python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py set-token --stdin
+  ```
 
-**Idiomas**: Siempre obtener de la API (`GET /locales`) antes de sync. No hardcodear idiomas.
+  Queda en `~/.config/desa/api-token` con permisos 600. Fuera de macOS, que ejecute en su terminal `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py set-token`, que lo pide por teclado. Si aun así pega el token en el chat, guardarlo con Write en `~/.config/desa/api-token`, ejecutar `chmod 600 ~/.config/desa/api-token` y avisarle de que queda en el historial de la sesión.
 
-## Paso 2: Configuración
+Si `token-status` dice `OK DESA_API_TOKEN`, el token sale de esa variable de entorno, que tiene prioridad: ante un 401, pedir al usuario que la actualice o la quite, porque `set-token` no la cambia.
 
-**Antes de cualquier llamada a la API**, extrae el token de `~/.claude/settings.json`:
-
-```bash
-python3 -c "import json, os; f=os.path.expanduser('~/.claude/settings.json'); print(json.load(open(f)).get('desa_wiki_token','') if os.path.exists(f) else '')"
-```
-
-Guarda el valor resultante y úsalo directamente en todas las llamadas curl como `Bearer TOKEN`.
-
-Si el resultado está vacío (no hay token guardado):
-
-1. Pide al usuario que te pase su token ("Pásame tu token para continuar")
-2. Una vez lo proporcione, guárdalo en `~/.claude/settings.json` usando Read para leer el fichero y Edit para añadir la clave `"desa_wiki_token": "TOKEN_DEL_USUARIO"` al objeto JSON raíz
-3. Usa ese token directamente en las llamadas curl de esta sesión
-
-**No continúes sin token válido.**
-
-## API
-
-- **Base URL**: `https://api2.grupodesa.app`
-- **Auth**: `Authorization: Bearer TOKEN` (el token extraído de settings.json)
-- **curl**: Usar siempre `-g` para evitar problemas con corchetes en URLs
-- **Importante**: No usar variables de entorno en curl. No persisten entre llamadas. Siempre pegar el token directamente en el comando curl
-
-### Endpoints de Terms
-
-| Método | URI | Descripción |
-|--------|-----|-------------|
-| GET | `/terms` | Listado paginado con filtros |
-| GET | `/terms/{id}` | Detalle de un term |
-| POST | `/terms/new` | Crear term |
-| POST | `/terms/{id}` | Actualizar term |
-| DELETE | `/terms/{id}` | Soft delete |
-
-### Filtros (query params en GET /terms)
-
-- `filter[namespace]=app` — Filtrar por namespace
-- `filter[code]=global.save` — Coincidencia exacta por código. **Siempre combinar con `filter[namespace]`** porque el mismo code puede existir en múltiples namespaces
-- `filter[search]=guardar` — Búsqueda fulltext en searchable_tags
-- `perPage=100` — Resultados por página (usar 100 para sync)
-- `sort[by]=code&sort[dir]=asc` — Ordenar por código ascendente
-- `page=N` — Paginación
-
-### Endpoint de Locales
-
-| Método | URI | Descripción |
-|--------|-----|-------------|
-| GET | `/locales` | Locales disponibles con códigos |
-
-### Estructura de respuesta
-
-**GET /terms** (listado):
-```json
-{
-  "data": [
-    {
-      "id": 1,
-      "fields": {
-        "namespace": "app",
-        "code": "accounts.amortizations",
-        "value": {
-          "es": "Amortizaciones",
-          "fr": "Amortissement",
-          "pt": "Depreciação"
-        },
-        "created_at": "2026-03-07T06:53:35.000000Z",
-        "updated_at": "2026-03-07T07:17:12.000000Z"
-      }
-    }
-  ],
-  "meta": {
-    "page": 1,
-    "per_page": 100,
-    "has_more_pages": true,
-    "total": 1138
-  }
-}
-```
-
-**GET /locales**:
-```json
-{
-  "data": [
-    { "id": 1, "fields": { "code": "es", "name": "Español", "is_default": true } },
-    { "id": 2, "fields": { "code": "pt", "name": "Português", "is_default": false } },
-    { "id": 3, "fields": { "code": "fr", "name": "Française", "is_default": false } },
-    { "id": 4, "fields": { "code": "en", "name": "English", "is_default": false } },
-    { "id": 5, "fields": { "code": "it", "name": "Italiano", "is_default": false } }
-  ]
-}
-```
-
-**GET /terms/{id}** y **GET /terms?filter[code]+filter[namespace]** (term individual):
-```json
-{
-  "data": {
-    "id": 604,
-    "fields": {
-      "namespace": "app",
-      "code": "global.save",
-      "value": { "es": "Guardar", "en": "Save", "fr": "Sauvegarder", "pt": "Guardar" },
-      "created_at": "2026-03-07T06:55:09.000000Z",
-      "updated_at": "2026-03-08T08:14:44.000000Z"
-    }
-  }
-}
-```
-
-**Importante**: `filter[code]` + `filter[namespace]` devuelve `data` como **objeto** (un term), no como array. Si no encuentra coincidencia, devuelve 404. El listado paginado (`filter[search]`, sin `filter[code]`) devuelve `data` como **array** con `meta`.
-
-Notas sobre la respuesta:
-- `value` solo contiene los idiomas que tienen traducción (no incluye claves vacías)
-- Paginación (solo en listados): usar `meta.has_more_pages` para saber si hay más páginas
-- El `id` del term es necesario para actualizar (`POST /terms/{id}`) y eliminar (`DELETE /terms/{id}`)
-
-### Body para crear/actualizar (POST)
-
-```json
-{
-  "fields": {
-    "namespace": "app",
-    "code": "global.save",
-    "value": {
-      "es": "Guardar",
-      "fr": "Sauvegarder",
-      "pt": "Salvar"
-    }
-  }
-}
-```
-
-`value` es un objeto clave-locale. Solo incluir locales que tengan traducción. No enviar cadenas vacías.
-
-### Ejemplos curl
-
-**Buscar (fulltext)**:
-```bash
-curl -s -g -X GET "https://api2.grupodesa.app/terms?filter[search]=guardar&perPage=25&sort[by]=code&sort[dir]=asc" \
-  -H "Authorization: Bearer TOKEN" \
-  -H "Accept: application/json"
-```
-
-**Buscar (exacta por code — siempre con namespace)**:
-```bash
-curl -s -g -X GET "https://api2.grupodesa.app/terms?filter[code]=global.save&filter[namespace]=app" \
-  -H "Authorization: Bearer TOKEN" \
-  -H "Accept: application/json"
-```
-
-**Obtener por ID**:
-```bash
-curl -s -g -X GET "https://api2.grupodesa.app/terms/487" \
-  -H "Authorization: Bearer TOKEN" \
-  -H "Accept: application/json"
-```
-
-**Crear**:
-```bash
-curl -s -g -X POST "https://api2.grupodesa.app/terms/new" \
-  -H "Authorization: Bearer TOKEN" \
-  -H "Accept: application/json" \
-  -H "Content-Type: application/json" \
-  -d '{"fields":{"namespace":"app","code":"global.save","value":{"es":"Guardar","en":"Save"}}}'
-```
-
-**Actualizar** (requiere ID del term):
-```bash
-curl -s -g -X POST "https://api2.grupodesa.app/terms/42" \
-  -H "Authorization: Bearer TOKEN" \
-  -H "Accept: application/json" \
-  -H "Content-Type: application/json" \
-  -d '{"fields":{"namespace":"app","code":"global.save","value":{"es":"Guardar","en":"Save","fr":"Sauvegarder","pt":"Salvar"}}}'
-```
-
-**Eliminar** (requiere ID del term):
-```bash
-curl -s -g -X DELETE "https://api2.grupodesa.app/terms/42" \
-  -H "Authorization: Bearer TOKEN" \
-  -H "Accept: application/json"
-```
-
-**Locales**:
-```bash
-curl -s -g -X GET "https://api2.grupodesa.app/locales" \
-  -H "Authorization: Bearer TOKEN" \
-  -H "Accept: application/json"
-```
-
-## Formatos de archivo
-
-### Frontend (React/i18next)
-
-- Ruta: `packages/i18n/src/locales/{lang}/translations.json`
-- JSON plano, claves dot-notation, ordenadas alfabéticamente
-- Indentación: 2 espacios, trailing newline
-- Crear directorio `{lang}/` si no existe
-- Ejemplo:
-
-```json
-{
-  "accounts.amortizations": "Amortizaciones",
-  "activities.featured": "Destacadas",
-  "activities.goal-notes": "Deja aquí tus notas sobre {{goal}}"
-}
-```
-
-**Importante para frontend**: Al añadir un nuevo idioma (ej. `it`), también hay que registrarlo en `packages/i18n/src/index.js` (import + resources + supportedLngs) y en las configuraciones de i18n de web y mobile. Informar al usuario de este paso.
-
-### Backend (Laravel)
-
-- Ruta: `resources/lang/{lang}/{namespace}.php`
-- PHP `return array(...)` plano con claves dot-notation (incluido notifications, siempre aplanado)
-- Ordenadas alfabéticamente, comillas dobles, `=>` alineados
-- Escapar `"` → `\"` y `\` → `\\` en valores
-- Trailing newline
-- Crear directorio `{lang}/` si no existe
-- Ejemplo:
-
-```php
-<?php
-
-return array(
-    "activities.featured"   => "Destacadas",
-    "activities.goal-notes" => "Deja aquí tus notas sobre {{goal}}",
-);
-```
-
-Alineación: encontrar la clave más larga del archivo, rellenar con espacios antes de `=>` para que todos queden alineados.
-
-## Ortografía — OBLIGATORIO
-
-Todo el contenido en español debe tener **acentos correctos**. Esto es un requisito bloqueante: no envíes ningún POST sin haber verificado la ortografía del campo `value.es`.
-
-Palabras que frecuentemente se escriben sin tilde por error:
-
-| Incorrecto | Correcto |
-|-----------|----------|
-| topologia | topología |
-| fisico/a | físico/a |
-| tuneles | túneles |
-| funcion | función |
-| publica | pública |
-| logica | lógica |
-| parametro | parámetro |
-| configuracion | configuración |
-| informacion | información |
-| gestion | gestión |
-| autenticacion | autenticación |
-| conexion | conexión |
-| operacion | operación |
-| direccion | dirección |
-| descripcion | descripción |
-| sincronizacion | sincronización |
-| documentacion | documentación |
-| numero | número |
-| codigo | código |
-| metodo | método |
-| unico/a | único/a |
-| tecnologia | tecnología |
-| logistico/a | logístico/a |
-| analisis | análisis |
-| politica | política |
-| automatico/a | automático/a |
-| vehiculo | vehículo |
-| catalogo | catálogo |
-| periodo | período |
-| almacen | almacén |
-| tambien | también |
-| asi | así |
-| mas (adverbio) | más |
-| actua | actúa |
-
-**Antes de cada POST**, revisa `value.es` y corrige cualquier palabra sin tilde. Solo aplicar al locale `es`.
+Sin token válido no se sigue. El mismo token sirve para `/desa:wiki`.
 
 ## Modo de operación
 
-Analiza lo que pide el usuario con `$ARGUMENTS`:
+Deducir la intención de `$ARGUMENTS`:
 
-- **"sincroniza"**, **"sync"**, **"actualiza archivos"**: Modo sync (pull API → archivos locales)
-- **"busca X"**, **"search X"**: Modo búsqueda
-- **"crea ..."**, **"crear ..."**, **"add ..."**, **"nuevo ..."**: Modo crear
-- **"actualiza ..."**, **"update ..."**, **"modifica ..."**: Modo actualizar
-- **"elimina ..."**, **"delete ..."**, **"borra ..."**: Modo eliminar
+- **Sincronizar** («sincroniza», «sync», «actualiza los ficheros de idioma»): traer de la API a los ficheros locales.
+- **Buscar** («busca X», «¿existe una traducción para…?»).
+- **Crear o actualizar** un term («añade», «crea», «cambia el texto de…», «traduce… al francés»).
+- **Eliminar** un term («elimina», «borra»).
 
-Si un POST devuelve error 403, informa al usuario de que no tiene permisos. Si devuelve 422, muestra los detalles del error de validación.
+«Actualiza las traducciones», sin más, es ambiguo entre sincronizar y cambiar un term: preguntar. Si `$ARGUMENTS` está vacío, pedir qué hacer y terminar.
 
-## Flujo: Crear/Actualizar term
+## Errores de la API
 
-1. Detectar proyecto
-2. Extraer token
-3. Determinar namespace: frontend → siempre `app`; backend → inferir del contexto o preguntar, default `app`
-4. **Buscar si el term ya existe**: `GET /terms?filter[code]={code}&filter[namespace]={ns}`. Devuelve 0 o 1 resultado. Si existe, usar su `id` para actualizar; si no existe, crear
-5. Construir el objeto `value`: incluir solo los locales con traducción conocida. No enviar cadenas vacías
-6. **Spell-check** de `value.es` contra la tabla de ortografía
-7. POST a `/terms/new` (crear) o `/terms/{id}` (actualizar con merge de valores existentes)
-8. Verificar respuesta exitosa
-9. **Actualizar archivos locales** si estamos en un proyecto:
-   - Leer el archivo, añadir/actualizar la clave, reordenar alfabéticamente, escribir
-   - Frontend: actualizar `translations.json` de cada idioma que tenga valor
-   - Backend: actualizar `{namespace}.php` de cada idioma que tenga valor
+`terms.py` aborta con `ERROR=` y no escribe nada, ni en la API ni en local. Los cambios locales se calculan antes de escribir en la API; si la API ya se ha escrito y falla la escritura local, lo dice aparte con `ERROR_LOCAL=`, con los ficheros que se escribieron y los que no, y entonces hay que avisar al usuario de que la API sí quedó actualizada. En sync, `ERROR_LOCAL=` dice lo mismo de los ficheros locales. Un `--ns` o un `--code` que no tengan el formato de la API (minúsculas, números, `-` y `_`, con puntos entre segmentos en el code) se rechazan antes de llamarla, y si la API devuelve un term distinto del pedido (no distingue mayúsculas), `terms.py` aborta sin usarlo. Los errores de la API:
 
-Para actualizar: GET `/terms/{id}` para obtener valores actuales, mergear los nuevos valores sobre los existentes, luego POST con el resultado completo.
+- **401**: token caducado o inválido → pedir uno nuevo con el procedimiento del Paso 2.
+- **403**: autenticado pero sin permisos de escritura → decírselo al usuario.
+- **404** en una búsqueda por code: el term no existe (no es un error). En `/terms/{id}`: el id no existe.
+- **422**: error de validación → enseñar el campo `errors` de la respuesta.
+- **5xx** o error de red → decírselo al usuario e invitarle a reintentar en unos instantes.
 
-## Flujo: Eliminar term
-
-1. Detectar proyecto
-2. Extraer token
-3. Buscar el term por código: `GET /terms?filter[code]={code}&filter[namespace]={ns}` para obtener el `id`
-4. Confirmar con el usuario antes de eliminar (mostrar code y valores actuales)
-5. `DELETE /terms/{id}`
-6. Eliminar la clave de los archivos locales si estamos en un proyecto
-
-## Flujo: Sync (pull desde API)
-
-Requiere estar en un proyecto (frontend o backend). La API es la fuente de verdad: los archivos locales se sobreescriben completamente.
-
-1. Detectar proyecto (obligatorio)
-2. Extraer token
-3. GET `/locales` para obtener todos los idiomas disponibles
-
-### Sync frontend
-
-4. Fetch todos los terms de namespace `app` con paginación (ver sección Paginación)
-5. Para cada idioma obtenido de `/locales`:
-   - Construir JSON: `{ "code": value[lang] }` para cada term que tenga valor en ese idioma
-   - Si no hay terms para ese idioma, no crear el archivo
-   - Ordenar claves alfabéticamente
-   - Crear directorio `packages/i18n/src/locales/{lang}/` si no existe
-   - Escribir en `packages/i18n/src/locales/{lang}/translations.json`
-6. Si se crea un directorio de idioma nuevo, informar al usuario de que debe registrarlo en `packages/i18n/src/index.js`
-
-### Sync backend
-
-4. Para cada namespace en [app, export, notifications, paper-catalog]:
-   - Fetch todos los terms con paginación (ver sección Paginación)
-   - Para cada idioma obtenido de `/locales`:
-     - Recoger terms que tengan valor para este idioma
-     - Si hay terms: crear directorio `resources/lang/{lang}/` si no existe, generar PHP y escribir en `resources/lang/{lang}/{namespace}.php`
-     - Si no hay terms para este idioma+namespace: no crear el archivo
-
-5. Mostrar resumen: cuántos terms sincronizados, cuántos archivos escritos, qué idiomas
-
-### Paginación
-
-Usar un script python3 para fetch paginado eficiente. Ejemplo para un namespace:
+## Flujo: Buscar
 
 ```bash
-python3 -c "
-import json, subprocess
-
-def fetch_all(namespace, token):
-    all_terms = []
-    page = 1
-    while True:
-        r = subprocess.run(['curl', '-s', '-g',
-            f'https://api2.grupodesa.app/terms?filter[namespace]={namespace}&perPage=100&sort[by]=code&sort[dir]=asc&page={page}',
-            '-H', f'Authorization: Bearer {token}',
-            '-H', 'Accept: application/json'], capture_output=True, text=True)
-        data = json.loads(r.stdout)
-        all_terms.extend(data['data'])
-        if not data['meta']['has_more_pages']:
-            break
-        page += 1
-    return all_terms
-
-token = 'TOKEN_AQUI'
-terms = fetch_all('app', token)
-print(json.dumps(terms, ensure_ascii=False))
-"
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py search 'texto a buscar'
 ```
 
-Adaptar el script según el flujo (frontend genera JSON, backend genera PHP). Procesar todos los idiomas en un solo script para evitar múltiples ejecuciones.
+Imprime una tabla con una columna por idioma de `/locales` (`—` donde no hay traducción). Si sale `HAY_MAS=si`, decírselo al usuario y preguntar si quiere la siguiente página (`--page 2`).
 
-## Flujo: Búsqueda
+## Flujo: Crear o actualizar un term
 
-1. Extraer token
-2. `GET /terms?filter[search]={query}&perPage=25&sort[by]=code&sort[dir]=asc`
-3. Mostrar resultados en tabla con todos los idiomas que tengan valor:
+1. Namespace: en frontend, siempre `app`; en backend, deducirlo del contexto o preguntar, con `app` por defecto.
+2. Comprobar si existe: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py find --ns {ns} --code {code}` (imprime el term o `NO_EXISTE`). Antes de crear uno nuevo, buscar también por el texto en español (`search`): si ya hay un `global.*` con el mismo valor y significado, mencionarlo en el resultado, sin bloquear la creación.
+3. Escribir los valores con Write en un fichero JSON (`{"es": "…", "fr": "…"}`), solo con idiomas de `/locales`, en el directorio que da `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/desa_api.py workdir`. Por defecto, los idiomas que ha dado el usuario; `upsert` avisa con `SIN_TRADUCCION` de los que faltan. Si el `CLAUDE.md` del proyecto pide traducir a todos los idiomas de `/locales`, proponer los que falten: son traducciones del modelo y requieren la confirmación del paso 6. Nunca cadenas vacías. Variantes: `es` es español de España y `pt`, portugués de Portugal.
+4. Revisar la ortografía de `es` (sección «Ortografía»). Si se corrige el texto que ha dado el usuario, cuenta para la confirmación del paso 6.
+5. Dry-run: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py upsert --ns {ns} --code {code} --values {fichero}`. Enseña, por idioma, el valor actual, el nuevo y si es nuevo o sobrescribe, en `LOCAL` los ficheros que tocaría y en `CAMBIA_FORMATO` cuántos de ellos se reescribirían con otro formato, perdiendo sus comentarios. Con un namespace propio de Laravel se niega. Con uno que no existe en local, lo deja solo en la API y lo avisa. Con `NAMESPACE_AJENO`, un namespace local con claves y ninguna en la API, también se niega: escribirlo haría que el siguiente sync propusiera dar de baja todas las demás claves locales.
+6. **Pedir confirmación** antes de `--apply` si se sobrescribe algún valor, si hay traducciones propuestas por el modelo, si se ha corregido la ortografía del texto del usuario o si `CAMBIA_FORMATO` no es 0. En ese caso, enseñar la tabla del dry-run y decir de dónde sale cada valor. Si el usuario ha dado todos los valores de un term nuevo, basta con enseñar el resultado.
+7. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py upsert --ns {ns} --code {code} --values {fichero} --apply`. Envía el objeto completo (lo actual fusionado con lo nuevo) y actualiza los ficheros locales de cada idioma con valor. La API sustituye `value` entero, así que se envían también los idiomas del term que no están en `/locales` (el `AVISO` dice que se conservan) y no se escriben en local.
 
-```
-| Namespace | Code | ES | FR | PT | EN | IT |
-|-----------|------|----|----|----|----|----|
-| app | global.save | Guardar | Sauvegarder | Salvar | Save | — |
-```
+Si sale `AVISO=idioma nuevo …`, decirle al usuario que registre el idioma en `packages/i18n/src/index.js` (import, resources y supportedLngs) y en la configuración de i18n de web y mobile.
 
-Usar `—` para idiomas sin traducción.
+## Flujo: Eliminar un term
 
-4. Si `meta.has_more_pages` es true, indicar al usuario y preguntar si quiere ver más
+1. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py delete --ns {ns} --code {code}`: enseña el namespace, el code, el id y los valores actuales, sin borrar. Con `NAMESPACE_AJENO` se niega: el term es del proyecto que usa el namespace de la API.
+2. Confirmar con el usuario, enseñando code y valores, y el aviso de `CAMBIA_FORMATO` si no es 0.
+3. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py delete --ns {ns} --code {code} --apply`: lo borra de la API (soft delete) y quita la clave de los ficheros locales de todos los idiomas.
 
-## Reglas importantes
+## Flujo: Sincronizar (API → ficheros locales)
 
-- **API es la fuente de verdad** — sync siempre sobreescribe archivos locales completamente
-- **NUNCA tocar** auth.php, validation.php, passwords.php, pagination.php, errors.php
-- **Spell-check** obligatorio para `value.es` antes de cada POST
-- **Buscar antes de crear** — usar `filter[code]` + `filter[namespace]` para verificar si el term ya existe. Nunca usar solo `filter[code]` sin namespace
-- **Error handling**: 422 → mostrar errores de validación; 403 → informar permisos insuficientes
-- **Namespace por defecto**: `app` si el usuario no especifica otro
-- **Idiomas dinámicos**: siempre obtener de `/locales`, no hardcodear. Crear directorios y archivos para todos los idiomas que tengan datos
+Requiere estar en un proyecto. La API es la fuente de verdad: el contenido de cada fichero gestionado se sustituye por el de la API.
+
+1. Dry-run: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py sync`. Imprime, por fichero, altas, cambios y bajas (`+N ~N -N`, con las claves que se darían de baja), y además:
+   - `BAJAS`: número de claves que desaparecerían;
+   - `CAMBIA_FORMATO`: ficheros que se reescribirían con otro formato y perderían sus comentarios, con o sin cambios de datos (en la línea del fichero, «solo formato» o «cambia también el formato»);
+   - `CAMBIOS_SIN_COMMITEAR`: ficheros de idioma con cambios en git que el sync sobrescribiría;
+   - `NAMESPACE_AJENO`: namespaces locales que se llaman como uno de la API pero no comparten ninguna clave con él (p. ej. el `app` propio de gdapps frente al `app` de grupodesa); no se tocan;
+   - `OBSOLETO`: ficheros de un idioma sin terms en la API; no se borran;
+   - `SIN_TERMS_EN_API`: namespaces locales que la API no gestiona; no se tocan;
+   - `SOLO_EN_API`: namespaces de la API que no existen en local;
+   - `IDIOMAS_NUEVOS`.
+2. Si `BAJAS=0`, `CAMBIA_FORMATO=0` y `CAMBIOS_SIN_COMMITEAR=ninguno`, aplicar directamente. Si no, enseñárselo al usuario y pedir confirmación: las bajas y los cambios sin commitear pueden ser trabajo local sin subir o terms borrados en la API por error, y un cambio de formato reescribe ficheros que el proyecto mantiene con otro estilo.
+3. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/terms.py sync --apply`, con los mismos argumentos que el dry-run que se ha revisado. Para crear en local un namespace de `SOLO_EN_API`, o sustituir uno de `NAMESPACE_AJENO`, añadir `--include-ns {ns}` solo si el usuario lo pide, y volver a hacer antes el dry-run con ese flag y aplicarle la regla del paso 2. `--include-ns` no admite los namespaces propios de Laravel. En frontend solo existe el namespace `app`.
+4. Resumen al usuario: ficheros escritos, idiomas y avisos. Si hay `IDIOMAS_NUEVOS` en frontend, recordar registrarlos en `packages/i18n/src/index.js`.
+
+## Referencia de la API
+
+`terms.py` ya la usa. Esta sección es para entender sus mensajes, no para llamarla a mano.
+
+| Método | URI | Descripción |
+|--------|-----|-------------|
+| GET | `/locales` | Idiomas disponibles |
+| GET | `/terms?filter[namespace]=…&filter[search]=…&perPage=100&page=N` | Listado paginado (`meta.has_more_pages`) |
+| GET | `/terms?filter[code]=…&filter[namespace]=…` | Un term exacto: `data` es un **objeto**, o 404 si no existe. Siempre con namespace, porque el mismo code puede estar en varios |
+| POST | `/terms/new` | Crear: `{"fields": {"namespace", "code", "value": {"es": …}}}` |
+| POST | `/terms/{id}` | Actualizar, con el mismo body |
+| DELETE | `/terms/{id}` | Soft delete |
+
+`value` es un objeto por idioma y solo trae los idiomas con traducción.
+
+## Formatos de fichero
+
+`terms.py` los escribe, y los lee sin ejecutarlos: si un PHP no es un `return array(...)` plano de pares texto => texto, se niega y pide `--allow-php`, que lo carga con PHP y por tanto lo ejecuta. Añadir `--allow-php` solo si el usuario confía en ese fichero, porque no está preaprobado. Se describen para poder revisar un diff:
+
+- **Frontend**: JSON plano con claves en dot-notation ordenadas, 2 espacios de indentación, UTF-8 sin escapar y salto de línea final.
+- **Backend**: `<?php\n\nreturn array(...);` plano, con claves ordenadas, comillas dobles, `=>` alineados con la clave más larga y salto de línea final. Claves y valores se escapan en este orden: `\` → `\\`, `"` → `\"`, `$` → `\$`. Dentro de comillas dobles PHP interpola `$var` y evalúa `{${expr}}`, así que un valor sin escapar tumba el fichero entero (Laravel convierte el warning en excepción) o ejecuta código al cargarlo, y los valores los escribe cualquiera con acceso a la API.
+
+## Ortografía
+
+Antes de cada escritura, revisar el `value.es` completo con `${CLAUDE_PLUGIN_ROOT}/references/ortografia.md`. La tabla recoge los errores más frecuentes y las formas que dependen del contexto (*publica*, *numero*), pero se revisa todo el texto. Solo se aplica a `es`.
+
+## Límites
+
+- **La API es la fuente de verdad**, y los ficheros locales se escriben solo con `terms.py`.
+- **Buscar antes de crear**, siempre con code y namespace.
+- **Ortografía** de `value.es` revisada antes de cada escritura.
+- **Los ficheros propios de Laravel no se tocan nunca.**
