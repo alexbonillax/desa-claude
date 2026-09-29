@@ -24,7 +24,9 @@
 #                BD de desarrollo. Con Laravel 7 o anterior, o con un <env> repetido, un valor que
 #                no se sabe qué fuente gana da no-aislado.
 #   CONEXIONES_REALES  (solo backend, si hay) conexiones de config/database.php con un servidor
-#                escrito en el fichero; ENTORNO_TEST solo mira la conexión por defecto.
+#                que no es local, escrito en el fichero o en las variables de env() que usa, o
+#                "desconocido (…)" si no se puede analizar; ENTORNO_TEST solo mira la conexión por
+#                defecto.
 
 set -u
 
@@ -112,7 +114,7 @@ sqlite_path() {
 }
 is_memory() { case "$1" in *:memory:*|*mode=memory*) return 0 ;; esac; return 1; }
 entorno_test() {
-  local cache app r db src u url dbn dsrc url_memory="" dev
+  local cache app r db src u url dbn dsrc dev
   cache=${APP_CONFIG_CACHE:-bootstrap/cache/config.php}
   if [ -f "$cache" ]; then
     echo "no-aislado (configuración cacheada en $cache: Laravel no lee .env, .env.testing ni phpunit.xml; php artisan config:clear)"; return
@@ -126,17 +128,18 @@ entorno_test() {
     [ -n "$r" ] || continue
     url=${r%%$'\t'*}; src=${r#*$'\t'}
     [ "$url" = "!CONFLICTO" ] && { echo "no-aislado ($src)"; return; }
-    # La URL decide el driver y la base de datos, y pisa DB_DATABASE.
-    if [ "${url#sqlite:}" != "$url" ] && is_memory "$url" && test_source "$src"; then url_memory=1; continue; fi
+    # La URL decide el driver y la base de datos, y pisa DB_DATABASE. Una de sqlite en memoria de
+    # un fichero de tests no aísla por sí sola: puede que la conexión no la lea, y según la forma
+    # (sqlite::memory:, sqlite://:memory:) Laravel abre un fichero. Se sigue con las demás reglas.
+    if [ "${url#sqlite:}" != "$url" ] && is_memory "$url" && test_source "$src"; then continue; fi
     echo "no-aislado ($u definida desde $src: la URL decide el driver y la base de datos)"; return
   done
   r=$(laravel_var DB_CONNECTION)
   db=${r%%$'\t'*}; src=${r#*$'\t'}
   if [ -z "$r" ]; then echo "desconocido (no se encuentra DB_CONNECTION)"; return; fi
   [ "$db" = "!CONFLICTO" ] && { echo "no-aislado ($src)"; return; }
-  if [ "$db" != sqlite ] && [ -z "$url_memory" ]; then echo "no-aislado (DB_CONNECTION=$db desde $src)"; return; fi
+  if [ "$db" != sqlite ]; then echo "no-aislado (DB_CONNECTION=$db desde $src)"; return; fi
   if ! test_source "$src"; then echo "no-aislado (DB_CONNECTION=$db desde $src: puede ser la BD de desarrollo)"; return; fi
-  if [ -n "$url_memory" ]; then echo "aislado (DB_CONNECTION=$db desde $src; URL de sqlite en memoria)"; return; fi
   r=$(laravel_var DB_DATABASE)
   dbn=${r%%$'\t'*}; dsrc=${r#*$'\t'}
   if [ -z "$r" ]; then
@@ -156,34 +159,62 @@ entorno_test() {
 }
 # ¿La fuente es solo de tests (phpunit.xml o .env.testing)?
 test_source() { case "$1" in phpunit.xml*|phpunit.dist.xml*|.env.testing) return 0 ;; esac; return 1; }
-# Conexiones de config/database.php con un servidor escrito en el propio fichero: un host que no
-# es local, o un dsn o una url, literales o como valor por defecto de env(). Laravel las usa
-# tal cual con APP_ENV=testing, y el código puede escribir en ellas con DB::connection('…').
+# Conexiones de config/database.php cuyo host, dsn o url es un servidor que no es local: escrito
+# en el fichero, como valor por defecto de env() o como valor de la variable de env() en el
+# entorno de tests (resuelta con laravel_var). Laravel las usa tal cual con APP_ENV=testing, y el
+# código puede escribir en ellas con DB::connection('…'). Lee el fichero con el tokenizer de PHP,
+# que no lo ejecuta; si no puede, imprime "desconocido (…)".
+CONEX_PHP='
+$src = @file_get_contents($argv[1]);
+if ($src === false) exit(2);
+try { $toks = token_get_all($src, TOKEN_PARSE); } catch (Throwable $e) { exit(2); }
+$t = [];
+foreach ($toks as $x) if (!is_array($x) || !in_array($x[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) $t[] = $x;
+$lit = function ($x) { return is_array($x) && $x[0] === T_CONSTANT_ENCAPSED_STRING ? stripcslashes(substr($x[1], 1, -1)) : null; };
+$st = [];
+for ($i = 0, $n = count($t); $i < $n; $i++) {
+    $x = $t[$i]; $v = is_array($x) ? $x[1] : $x;
+    if ($v === "[") { $st[] = ["arr" => true, "key" => null]; continue; }
+    if (is_array($x) && $x[0] === T_ARRAY && ($t[$i + 1] ?? null) === "(") { $st[] = ["arr" => true, "key" => null]; $i++; continue; }
+    if ($v === "(") {
+        $env = $i > 0 && is_array($t[$i - 1]) && $t[$i - 1][0] === T_STRING && strtolower($t[$i - 1][1]) === "env";
+        $st[] = ["arr" => false, "env" => $env, "arg" => 0]; continue;
+    }
+    if ($v === "]" || $v === ")") { array_pop($st); continue; }
+    $k = count($st) - 1;
+    if ($v === ",") { if ($k >= 0) { if ($st[$k]["arr"]) $st[$k]["key"] = null; else $st[$k]["arg"]++; } continue; }
+    $s = $lit($x);
+    if ($s === null) continue;
+    if (is_array($t[$i + 1] ?? null) && $t[$i + 1][0] === T_DOUBLE_ARROW) { if ($k >= 0 && $st[$k]["arr"]) $st[$k]["key"] = $s; $i++; continue; }
+    $names = [];
+    foreach ($st as $e) if ($e["arr"]) $names[] = $e["key"];
+    $c = array_search("connections", $names, true);
+    if ($c === false || !isset($names[$c + 1])) continue;
+    $key = null;
+    foreach (array_slice($names, $c + 2) as $u) if (in_array($u, ["host", "dsn", "url"], true)) { $key = $u; break; }
+    if ($key === null) continue;
+    $top = $st[$k];
+    $kind = !$top["arr"] && $top["env"] && $top["arg"] === 0 ? "VAR" : "LIT";
+    echo $names[$c + 1], "\t", $key, "\t", $kind, "\t", str_replace(["\t", "\n"], " ", $s), "\n";
+}
+'
 conexiones_reales() {
   [ -f config/database.php ] || return 0
-  perl -e '
-    local $/; my $src = <>;
-    $src =~ s{/\*.*?\*/}{}gs;
-    my ($depth, $in, $name, %real) = (0, 0, undef);
-    my $local = qr/^(|localhost|127\.0\.0\.1|::1)$/i;
-    for my $line (split /\n/, $src) {
-      next if $line =~ m{^\s*(//|#)};
-      if (!$in) { if ($line =~ /[\x27"]connections[\x27"]\s*=>\s*\[/) { $in = 1; $depth = 1 } next }
-      $name = $1 if $depth == 1 && $line =~ /^\s*[\x27"]([^\x27"]+)[\x27"]\s*=>\s*\[/;
-      if ($depth >= 2 && defined $name && $line =~ /^\s*[\x27"](host|dsn|url)[\x27"]\s*=>\s*(.*)$/) {
-        my ($key, $val, @lits) = ($1, $2);
-        if ($val =~ /^env\s*\(\s*[\x27"][^\x27"]*[\x27"]\s*,\s*[\x27"]([^\x27"]*)[\x27"]/) { @lits = ($1) }
-        elsif ($val =~ /^[\x27"]([^\x27"]*)[\x27"]/) { @lits = ($1) }
-        elsif ($val =~ /^\[/) { @lits = ($val =~ /[\x27"]([^\x27"]*)[\x27"]/g) }
-        for my $l (@lits) { $real{$name} = 1 unless $l eq "" || ($key eq "host" && $l =~ $local) }
-      }
-      (my $bare = $line) =~ s/\x27(?:[^\x27\\]|\\.)*\x27|"(?:[^"\\]|\\.)*"//g;
-      $depth += () = $bare =~ /\[/g;
-      $depth -= () = $bare =~ /\]/g;
-      $name = undef if $depth <= 1;
-      last if $depth <= 0;
-    }
-    print join(" ", sort keys %real), "\n" if %real;' config/database.php 2>/dev/null
+  local out conn key kind val v real=""
+  if ! out=$(php -r "$CONEX_PHP" config/database.php 2>/dev/null); then
+    echo "desconocido (no se ha podido analizar config/database.php con el tokenizer de php)"; return
+  fi
+  while IFS=$'\t' read -r conn key kind val; do
+    [ -n "$conn" ] || continue
+    if [ "$kind" = VAR ]; then v=$(laravel_var "$val"); v=${v%%$'\t'*}; else v=$val; fi
+    [ -n "$v" ] || continue
+    if [ "$key" = host ]; then case "$v" in localhost|127.0.0.1|::1) continue ;; esac; fi
+    case " $real " in *" $conn "*) ;; *) real="${real:+$real }$conn" ;; esac
+  done <<EOF
+$out
+EOF
+  [ -n "$real" ] && printf '%s\n' $real | sort | tr '\n' ' ' | sed 's/ $//' && echo
+  return 0
 }
 
 if [ -f artisan ] && [ -f composer.json ]; then

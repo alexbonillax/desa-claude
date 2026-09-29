@@ -19,10 +19,12 @@ proj() {
   for f in "$@"; do mkdir -p "$(dirname "$f")"; : > "$f"; done
 }
 exe() { for f in "$@"; do mkdir -p "$(dirname "$f")"; printf '#!/bin/sh\n' > "$f"; chmod +x "$f"; done; }
-fake_php() {  # fake_php NOMBRE MODULO [pcov.enabled]
+REAL_PHP=$(command -v php 2>/dev/null)
+fake_php() {  # fake_php NOMBRE MODULO [pcov.enabled]; el tokenizer de config/database.php va al php real
   mkdir -p "$ROOT/bin-$1"
   cat > "$ROOT/bin-$1/php" <<EOF
 #!/bin/sh
+case "\$2" in *token_get_all*) [ -n "$REAL_PHP" ] && exec "$REAL_PHP" "\$@"; exit 2 ;; esac
 [ "\$1" = "-m" ] && printf '[PHP Modules]\\nCore\\n%s\\n' "$2"
 [ "\$1" = "-r" ] && printf '%s' "${3:-1}"
 exit 0
@@ -205,7 +207,19 @@ PATH="$ROOT/bin-none:$PATH" run
 expect "<env> repetido con valores distintos" "ENTORNO_TEST=no-aislado (phpunit.xml define DB_CONNECTION varias veces con valores distintos)"
 printf '<phpunit>\n  <php>\n    <env name="DB_CONNECTION" value="sqlite"/>\n    <env name="DB_CONNECTION" value="sqlite"/>\n    <env name="DB_URL" value="sqlite::memory:"/>\n  </php>\n</phpunit>\n' > phpunit.xml
 PATH="$ROOT/bin-none:$PATH" run
-expect "<env> repetido con el mismo valor y URL de sqlite en memoria" "ENTORNO_TEST=aislado (DB_CONNECTION=sqlite desde phpunit.xml; URL de sqlite en memoria)"
+expect "una URL de sqlite en memoria no aísla por sí sola" "ENTORNO_TEST=no-aislado (sqlite sin DB_DATABASE: Laravel usaría database/database.sqlite, que puede ser la BD de desarrollo)"
+printf '<phpunit>\n  <php>\n    <env name="DB_CONNECTION" value="sqlite"/>\n    <env name="DB_DATABASE" value=":memory:"/>\n    <env name="DB_URL" value="sqlite:///:memory:"/>\n  </php>\n</phpunit>\n' > phpunit.xml
+PATH="$ROOT/bin-none:$PATH" run
+expect "URL de sqlite en memoria con el resto aislado" "ENTORNO_TEST=aislado (DB_CONNECTION=sqlite desde phpunit.xml; DB_DATABASE=:memory: desde phpunit.xml)"
+printf '<phpunit>\n  <php>\n    <env name="DB_URL" value="sqlite:///:memory:"/>\n  </php>\n</phpunit>\n' > phpunit.xml
+printf 'DB_CONNECTION=mysql\nDB_HOST=db.example.com\n' > .env.testing
+PATH="$ROOT/bin-none:$PATH" run
+expect "URL de sqlite en memoria con DB_CONNECTION=mysql (cp .env .env.testing)" "ENTORNO_TEST=no-aislado (DB_CONNECTION=mysql desde .env.testing)"
+rm .env.testing
+printf '<phpunit>\n  <php>\n    <env name="DB_CONNECTION" value="sqlite"/>\n    <env name="DB_URL" value="sqlite:///:memory:"/>\n  </php>\n</phpunit>\n' > phpunit.xml
+printf 'DB_CONNECTION=sqlite\nDB_DATABASE=database/dev.sqlite\n' > .env
+PATH="$ROOT/bin-none:$PATH" run
+expect "URL de sqlite en memoria y DB_DATABASE de .env" "ENTORNO_TEST=no-aislado (sqlite con DB_DATABASE=database/dev.sqlite desde .env (no hay .env.testing): puede ser la BD de desarrollo)"
 
 # El fichero sqlite de tests es el mismo que el de desarrollo
 proj env-mismo-fichero artisan composer.json phpunit.xml
@@ -279,7 +293,47 @@ EOF
 PATH="$ROOT/bin-none:$PATH" run
 expect "conexiones reales: el entorno sigue aislado" "ENTORNO_TEST=aislado (DB_CONNECTION=sqlite desde phpunit.xml; DB_DATABASE=:memory: desde phpunit.xml)"
 expect "conexiones reales: host, dsn y env() con un host por defecto" "CONEXIONES_REALES=externa odbc por-defecto"
-rm config/database.php
+cat > config/database.php <<'EOF'
+<?php
+
+return [
+    'connections' => [
+        'rw' => [
+            'driver' => 'mysql',
+            'read' => [
+                'host' => [
+                    '192.168.1.1',
+                ],
+            ],
+            'write' => ['host' => '127.0.0.1'],
+        ],
+        'linea' => ['driver' => 'mysql', 'host' => 'db.example.com'],
+        'vieja' => array(
+            'driver' => 'mysql',
+            'host' => 'old.example.com', // fin ]
+        ),
+        'siguiente'
+            => [
+            'host' =>
+                'next.example.com',
+        ],
+        'anidado' => ['host' => env('A', env('B', 'nested.example.com'))],
+        'elvis' => ['host' => env('X') ?: 'elvis.example.com'],
+        'variable' => ['host' => env('SECUNDARIA_HOST', '127.0.0.1')],
+        'local' => ['host' => env('LOCAL_HOST', 'localhost')],
+        'sqlite' => ['driver' => 'sqlite', 'url' => env('DATABASE_URL'), 'database' => ':memory:'],
+    ],
+];
+EOF
+printf 'SECUNDARIA_HOST=10.0.0.5\n' > .env.testing
+PATH="$ROOT/bin-none:$PATH" run
+if [ -n "$REAL_PHP" ]; then
+  expect "conexiones: read/write, una línea, array(), saltos de línea, env() anidado y variables resueltas" "CONEXIONES_REALES=anidado elvis linea rw siguiente variable vieja"
+  printf '<?php return [\n' > config/database.php
+  PATH="$ROOT/bin-none:$PATH" run
+  expect "config/database.php que no se puede analizar" "CONEXIONES_REALES=desconocido (no se ha podido analizar config/database.php con el tokenizer de php)"
+fi
+rm -f config/database.php .env.testing
 PATH="$ROOT/bin-none:$PATH" run
 expect_no_line() { if printf '%s\n' "$OUT" | grep -q "^$2"; then FAIL=$((FAIL + 1)); echo "FALLO: $1"; else PASS=$((PASS + 1)); fi; }
 expect_no_line "sin config/database.php no hay CONEXIONES_REALES" "CONEXIONES_REALES="

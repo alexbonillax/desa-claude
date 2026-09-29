@@ -5,6 +5,32 @@ All notable changes to the `desa` plugin will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.18.1] — 2026-09-29
+
+Correcciones de la verificación adversarial de la 1.18.0.
+
+### Security
+
+- **Una URL de sqlite en memoria ya no aísla por sí sola** — La 1.18.0 daba «aislado» con cualquier `DB_URL` o `DATABASE_URL` de sqlite en memoria de `phpunit.xml` o `.env.testing`, y se saltaba las comprobaciones de `DB_CONNECTION` y `DB_DATABASE`. Pero puede que la conexión no lea esa variable (los cuatro backends solo leen `DATABASE_URL`), y según la forma (`sqlite::memory:`, `sqlite://:memory:`) Laravel abre un fichero. Con `cp .env .env.testing` y `DB_CONNECTION=mysql`, los tests habrían ido contra el MySQL remoto. Ahora esa URL es neutra y se aplican las demás reglas.
+- **`CONEXIONES_REALES` resuelve las variables de `env()`** — Solo miraba los literales y los valores por defecto. En gdapps, `transfer` tiene `'host' => env('DB_HOST', '127.0.0.1')`, y el código hace `DB::connection('transfer')->insert(...)`. Ahora la variable se resuelve como la vería Laravel en tests. Hoy salen:
+  - en grupodesa-backend, `gdapps`, `snowflake-admin` y `spyro_transfer`;
+  - en desa-connect, las mismas tres;
+  - en gdapps, `desaverse`, `transfer`, `mysql`, `pgsql` y `sqlsrv`;
+  - en grupodesa-api, `mysql`, `pgsql` y `sqlsrv`.
+
+  En estos dos últimos, sin `.env.testing`, Laravel carga `.env`, cuyo `DB_HOST` no es local.
+- **`config/database.php` se lee con el tokenizer de PHP**, que no ejecuta el fichero. El análisis por líneas no veía `read`/`write` en varias líneas, conexiones en una línea, `array(`, valores en la línea siguiente ni `env()` anidados, y un comentario con `]` lo cortaba. Si no se puede analizar, sale `CONEXIONES_REALES=desconocido` y review lo trata como si hubiera conexiones reales.
+- **`diff-context.sh` ya no mete el nombre de la rama base de la PR en órdenes** — git admite `;`, `>` o `|` en los nombres de rama, y `DIFF_U0` se ejecuta tal cual. Si el nombre no es seguro, se usa el commit.
+
+### Fixed
+
+- **`/desa:update`**: el `git fetch` del paso 2 imprime algo siempre que hay versión nueva, y la regla «si devuelve algo, parar» lo incluía. Ahora es `fetch --quiet` y solo cuentan `status` y `log`.
+- **review**: la acción de ejecutar los tests con `CONEXIONES_REALES` solo se ofrece con `ENTORNO_TEST=aislado` y si hay tests asociados al diff.
+- **`terms.py`**: upsert y delete abortaban (desde la 1.18.0) si el fichero actual tenía un valor roto, justo cuando se quería corregir o quitar.
+- **`diff-context.sh`**:
+  - un rename en el working tree (` R`, tras `git add -N`) se leía como una ruta cortada;
+  - el recuento de cambios fuera de `--path` era cuadrático: con 16.000 ficheros sin trackear tardaba casi un minuto.
+
 ## [1.18.0] — 2026-09-29
 
 Correcciones de la verificación adversarial de la 1.17.0.

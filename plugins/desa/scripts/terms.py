@@ -516,8 +516,15 @@ def _local_plan(proj, ns, code, values, remove=False):
             if proj['kind'] == 'frontend' and not path.parent.exists():
                 print(f'AVISO=idioma nuevo {lang}: registrarlo en packages/i18n/src/index.js y en la configuración de i18n de web y mobile')
         writes.append((path, render(path, current)))
-        if original is not None and render(path, original) != path.read_bytes():
-            restyled.append(rel(proj, path))
+        if original is not None:
+            # Un valor roto (un surrogate suelto) en el fichero actual no impide corregirlo o
+            # quitarlo: ese fichero cuenta como reescrito con otro formato.
+            try:
+                same = render(path, original) == path.read_bytes()
+            except Abort:
+                same = False
+            if not same:
+                restyled.append(rel(proj, path))
     if writes:
         print(f'CAMBIA_FORMATO={len(restyled)}')
     if restyled:

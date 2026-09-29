@@ -485,6 +485,45 @@ expect "pr sin merge-base: sin DIFF_U0" "DIFF_U0="
 expect_no "pr sin merge-base: sin PR_BASE" "PR_BASE=origin/main"
 expect "pr sin merge-base: aviso" "AVISO=la base de la PR no tiene merge-base con HEAD en este clon (superficial: git fetch --unshallow, o fetch-depth: 0 en GitHub Actions), así que no hay DIFF_U0"
 
+# Rename en el working tree (git add -N): trae dos rutas en -z, como uno staged
+new_repo rename-wt "${MONO[@]}"
+mv packages/core/c.js packages/core/d.js && git add -N packages/core/d.js
+run
+expect "rename en el working tree: el fichero nuevo" "packages/core/d.js"
+expect_no "rename en el working tree: sin rutas cortadas" "kages/core/c.js"
+run --path packages/core
+if printf '%s\n' "$OUT" | grep -q '^AVISO='; then ko "rename en el working tree con --path no avisa en falso"; else ok; fi
+
+# --path con muchos ficheros sin trackear fuera: recuento lineal
+new_repo path-muchos "${MONO[@]}"
+mkdir -p apps/mobile/gen && (cd apps/mobile/gen && i=0; while [ $i -lt 3000 ]; do : > "f$i.js"; i=$((i + 1)); done)
+echo y >> apps/web/src/a.js
+t0=$(date +%s); run --path apps/web/src; t1=$(date +%s)
+expect "muchos fuera: aviso" "AVISO=hay 3000 ficheros con cambios sin commitear fuera de apps/web/src, que los tests del Paso 6 también verán"
+if [ $((t1 - t0)) -le 10 ]; then ok; else ko "3000 ficheros fuera de la ruta tardan $((t1 - t0)) s"; fi
+
+# PR con un nombre de rama base que podría inyectar órdenes: se usa el commit
+new_repo pr-inj "${MONO[@]}"
+INJ_MAIN=$(git rev-parse HEAD)
+git update-ref "refs/remotes/origin/rel;true>pwned" "$INJ_MAIN"
+git checkout -qb feat && echo y >> apps/web/src/a.js && git commit -qam feat
+INJ_FEAT=$(git rev-parse HEAD)
+mkdir -p "$ROOT/bin5"
+cat > "$ROOT/bin5/gh" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+  "pr diff 6 --name-only") echo apps/web/src/a.js ;;
+  *headRefOid*) echo "$INJ_FEAT" ;;
+  *baseRefName*) echo 'rel;true>pwned' ;;
+  *baseRefOid*) echo "$INJ_MAIN" ;;
+esac
+EOF
+chmod +x "$ROOT/bin5/gh"
+PATH="$ROOT/bin5:$PATH" run --pr 6
+expect "rama base con caracteres raros: se usa el commit" "PR_BASE=$INJ_MAIN"
+expect "rama base con caracteres raros: DIFF_U0 con el commit" "DIFF_U0=git diff --unified=0 $INJ_MAIN...HEAD"
+if printf '%s\n' "$OUT" | grep -q 'pwned'; then ko "el nombre de la rama base no debe salir en la salida"; else ok; fi
+
 run --otra
 expect_code "argumento no reconocido" 64
 

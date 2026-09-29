@@ -74,7 +74,7 @@ read_status() {
   g status --porcelain=v1 -z --untracked-files=all "$@" > "$TMP" 2>/dev/null || die 3 "falló: git status"
   while IFS= read -r -d '' entry; do
     xy=${entry:0:2}; p=${entry:3}
-    case "$xy" in R*|C*) IFS= read -r -d '' orig ;; esac
+    case "$xy" in *R*|*C*) IFS= read -r -d '' orig ;; esac
     case "$p" in *$'\n'*) NL_SKIPPED=$((NL_SKIPPED + 1)); continue ;; esac
     if [ "$xy" = "??" ]; then
       if is_tool "$p"; then EXCLUDED=$((EXCLUDED + 1)); else UNTRACKED="$UNTRACKED$p"$'\n'; fi
@@ -101,20 +101,18 @@ read_names() {
 # Rutas con cambios de todo el árbol que quedan fuera de $1, sin contar las de herramientas
 # sin trackear. Un rename cuenta por sus dos rutas: puede cruzar el límite de la ruta.
 dirty_outside() {
-  local entry xy p orig q n=0 seen=$'\n'
+  local entry xy p orig q
   g status --porcelain=v1 -z --untracked-files=all > "$TMP" 2>/dev/null || { echo 0; return; }
   while IFS= read -r -d '' entry; do
     xy=${entry:0:2}; p=${entry:3}; orig=""
-    case "$xy" in R*|C*) IFS= read -r -d '' orig ;; esac
+    case "$xy" in *R*|*C*) IFS= read -r -d '' orig ;; esac
     [ "$xy" = "??" ] && is_tool "$p" && continue
     for q in "$p" "$orig"; do
       [ -n "$q" ] || continue
-      case "$q" in "$1"|"$1"/*) continue ;; esac
-      case "$seen" in *$'\n'"$q"$'\n'*) continue ;; esac
-      seen="$seen$q"$'\n'; n=$((n + 1))
+      case "$q" in "$1"|"$1"/*|*$'\n'*) continue ;; esac
+      printf '%s\n' "$q"
     done
-  done < "$TMP"
-  echo "$n"
+  done < "$TMP" | sort -u | grep -c .
 }
 
 resolve_rel() {
@@ -165,6 +163,10 @@ if [ "$MODE" = pr ]; then
   HEAD_PR=$(gh pr view "$N" --json headRefOid -q .headRefOid 2>/dev/null)
   BASE_REF=$(gh pr view "$N" --json baseRefName -q .baseRefName 2>/dev/null)
   BASE_OID=$(gh pr view "$N" --json baseRefOid -q .baseRefOid 2>/dev/null)
+  # Van a órdenes que se ejecutan tal cual (DIFF_U0, DIFF_COVERAGE_BASE): solo nombres seguros.
+  case "$BASE_OID" in *[!0-9a-f]*) BASE_OID="" ;; esac
+  BASE_SAFE=$BASE_REF
+  case "$BASE_REF" in ''|*[!A-Za-z0-9._/-]*|-*) BASE_SAFE="" ;; esac
   read_status
   HEAD_NOW=$(git rev-parse HEAD 2>/dev/null)
   if [ -n "$HEAD_PR" ] && [ -z "$STAGED$UNSTAGED" ] && [ "$HEAD_NOW" = "$HEAD_PR" ]; then
@@ -172,19 +174,20 @@ if [ "$MODE" = pr ]; then
     # La base es el commit de la base que ve GitHub: con origin/{base} desactualizado, el
     # merge-base sería antiguo y DIFF_U0 metería commits ajenos a la PR.
     ORIGIN_OID=""
-    [ -n "$BASE_REF" ] && ORIGIN_OID=$(git rev-parse --verify -q "origin/$BASE_REF^{commit}" 2>/dev/null)
+    [ -n "$BASE_SAFE" ] && ORIGIN_OID=$(git rev-parse --verify -q "origin/$BASE_SAFE^{commit}" 2>/dev/null)
+    [ -n "$BASE_REF" ] && [ -z "$BASE_SAFE" ] && WARN="el nombre de la rama base de la PR tiene caracteres que no se usan en órdenes; se usa su commit"
     if [ -n "$BASE_OID" ] && [ "$ORIGIN_OID" = "$BASE_OID" ]; then
-      PR_BASE="origin/$BASE_REF"
+      PR_BASE="origin/$BASE_SAFE"
     elif [ -n "$BASE_OID" ] && git cat-file -e "$BASE_OID^{commit}" 2>/dev/null; then
       PR_BASE=$BASE_OID
-      [ -n "$ORIGIN_OID" ] && WARN="origin/$BASE_REF no coincide con la base actual de la PR; se usa la de GitHub (${BASE_OID:0:12})"
+      [ -n "$ORIGIN_OID" ] && WARN="${WARN:+$WARN; }origin/$BASE_SAFE no coincide con la base actual de la PR; se usa la de GitHub (${BASE_OID:0:12})"
     elif [ -n "$BASE_OID" ]; then
-      WARN="la base de la PR (${BASE_OID:0:12}) no está en local, así que no hay DIFF_U0 (git fetch origin ${BASE_REF:-su rama base})"
+      WARN="${WARN:+$WARN; }la base de la PR (${BASE_OID:0:12}) no está en local, así que no hay DIFF_U0 (git fetch origin ${BASE_SAFE:-su rama base})"
     elif [ -n "$ORIGIN_OID" ]; then
-      PR_BASE="origin/$BASE_REF"
-      WARN="gh no ha dado la base de la PR: no se ha comprobado que origin/$BASE_REF esté al día"
+      PR_BASE="origin/$BASE_SAFE"
+      WARN="${WARN:+$WARN; }gh no ha dado la base de la PR: no se ha comprobado que origin/$BASE_SAFE esté al día"
     else
-      WARN="sin la base de la PR en local no hay DIFF_U0 (git fetch origin ${BASE_REF:-su rama base})"
+      WARN="${WARN:+$WARN; }sin la base de la PR en local no hay DIFF_U0 (git fetch origin ${BASE_SAFE:-su rama base})"
     fi
     if [ -n "$PR_BASE" ] && ! git merge-base "$PR_BASE" HEAD >/dev/null 2>&1; then
       WARN="${WARN:+$WARN; }la base de la PR no tiene merge-base con HEAD en este clon (superficial: git fetch --unshallow, o fetch-depth: 0 en GitHub Actions), así que no hay DIFF_U0"

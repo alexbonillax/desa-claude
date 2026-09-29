@@ -23,12 +23,12 @@ Actualiza el plugin Desa a la última versión publicada y dice qué ha cambiado
 2. Comprobar que el clon del marketplace no tiene trabajo sin subir. Primero `fetch`, porque Claude Code actualiza el clon con `git pull origin HEAD`, que no mueve `origin/main`: sin él, todo lo que llegó en actualizaciones anteriores parecería trabajo sin subir.
 
     ```bash
-    git -C {installLocation} fetch origin
+    git -C {installLocation} fetch --quiet origin
     git -C {installLocation} status --porcelain
     git -C {installLocation} log --oneline @{u}..HEAD
     ```
 
-    Si alguna devuelve algo, parar y enseñárselo al usuario: si el `git pull` del paso 3 falla, Claude Code aparta el clon, lo vuelve a clonar y borra ese trabajo sin avisar, y el comando sale bien. Que lo suba o lo guarde antes de actualizar.
+    Si `status` o `log` devuelven algo, parar y enseñárselo al usuario (si falla el `fetch`, vale la regla general de abajo): si el `git pull` del paso 3 falla, Claude Code aparta el clon, lo vuelve a clonar y borra ese trabajo sin avisar, y el comando sale bien. Que lo suba o lo guarde antes de actualizar.
 
 3. Refrescar el marketplace:
 

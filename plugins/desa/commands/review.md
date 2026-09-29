@@ -98,7 +98,7 @@ Imprime:
 - `RUNNER` (`pest`, `phpunit`, `vitest`, `no-instalado` o `ninguno`), que sale de lo que está instalado, no de que exista `phpunit.xml`;
 - `COBERTURA` (`xdebug`, `pcov`, `v8`, `istanbul` o `ninguna`), solo si el driver está activo;
 - `PLAYWRIGHT`, `E2E_SMOKE` (specs en `tests/e2e/smoke`) y `DIFF_COVERAGE` (si el proyecto tiene `scripts/diff-coverage.mjs`);
-- en backend, `ENTORNO_TEST` y, si las hay, `CONEXIONES_REALES`: conexiones de `config/database.php` con un servidor escrito en el propio fichero (en grupodesa-backend, `spyro_transfer`, `gdapps` y `snowflake-admin`, que son de producción). `ENTORNO_TEST` solo mira la conexión por defecto, y Laravel usa estas tal cual también en tests.
+- en backend, `ENTORNO_TEST` y, si las hay, `CONEXIONES_REALES`: conexiones de `config/database.php` cuyo servidor no es local, escrito en el fichero o en las variables de `env()` que usa (en grupodesa-backend, `spyro_transfer`, `gdapps` y `snowflake-admin`, que son de producción), o `desconocido` si no se ha podido analizar el fichero. `ENTORNO_TEST` solo mira la conexión por defecto, y Laravel usa estas tal cual también en tests.
 
 - `RUNNER=ninguno` → anotar `Tests: sin runner configurado` (en el monorepo, `sin runner para este stack`) y continuar al Paso 7. No es error.
 - `RUNNER=no-instalado` → anotar `Tests: no ejecutables (runner configurado pero no instalado)` y omitir el Paso 7.
@@ -109,7 +109,7 @@ Imprime:
 
 **Solo con `ENTORNO_TEST=aislado`.** `test-context.sh` calcula la BD que vería Laravel con `APP_ENV=testing` en este mismo entorno: la configuración cacheada, las variables del proceso, `phpunit.xml`, `.env.testing` y `.env`. Solo cuenta como aislado un sqlite de tests, fijado en `phpunit.xml` o `.env.testing` y en memoria o en un fichero fijado ahí. En otro caso, la BD suele ser la real, en algún proyecto la de producción, o la de desarrollo del dev, y un test con `RefreshDatabase` hace `migrate:fresh` sobre ella: en grupodesa-backend ya pasó con un directorio lanzado bajo `APP_ENV=local` (31-07-2026). Con `no-aislado` o `desconocido`, no ejecutar ningún test: anotar `Tests: no ejecutables (entorno de tests no aislado: {motivo de ENTORNO_TEST})` y omitir el Paso 7.
 
-**Con `CONEXIONES_REALES`, los tests no se ejecutan solos.** Basta un test que llegue, aunque sea de rebote, a un `DB::connection('spyro_transfer')->insert(...)` para escribir en producción, y desde la revisión no se puede saber qué llamadas hace cada test. Anotar `Tests: no ejecutados (conexiones a servidores reales en config/database.php: {CONEXIONES_REALES})`, omitir el Paso 7 y ofrecer en «Acciones propuestas» ejecutarlos igualmente, con la orden exacta y la lista de tests. Solo si el dev elige esa acción, ejecutarlos como se describe abajo y seguir con el Paso 7.
+**Con `ENTORNO_TEST=aislado` y `CONEXIONES_REALES` (también si vale `desconocido`), los tests no se ejecutan solos.** Con `no-aislado` o `desconocido` en `ENTORNO_TEST` no se ejecuta nada ni se ofrece ejecutarlo: manda el párrafo anterior. Esto va después de los pasos 1 y 2 de abajo: si no hay test asociado al diff, se anota eso y no se ofrece nada. Basta un test que llegue, aunque sea de rebote, a un `DB::connection('spyro_transfer')->insert(...)` para escribir en producción, y desde la revisión no se puede saber qué llamadas hace cada test. Anotar `Tests: no ejecutados (conexiones a servidores reales en config/database.php: {CONEXIONES_REALES})`, omitir el Paso 7 y ofrecer en «Acciones propuestas» ejecutarlos igualmente, con la orden exacta y la lista de tests. Solo si el dev elige esa acción, ejecutarlos como se describe abajo y seguir con el Paso 7.
 
 Con entorno aislado, siempre con `APP_ENV=testing` delante y siempre con ficheros de test concretos, nunca un directorio ni la suite completa.
 
@@ -156,7 +156,7 @@ El equipo aún no ha definido el runner de tests del monorepo ni el de mobile (p
 - **Nunca** modificar el código fuente del proyecto en esta fase. Una regresión se reporta como Crítica con la corrección propuesta. Solo se aplica si el dev la elige en «Acciones propuestas», al final del informe.
 - **Nunca** generar tests nuevos aquí — eso es Paso 7.
 - **Nunca** continuar al Paso 7 mientras haya una regresión o un test desactualizado sin resolver. Los fallos ajenos al diff no bloquean.
-- **Nunca** ejecutar tests de backend sin `ENTORNO_TEST=aislado`, ni un directorio, una suite completa o un `APP_ENV` distinto de `testing`. Con `CONEXIONES_REALES`, solo si el dev lo elige en «Acciones propuestas».
+- **Nunca** ejecutar tests de backend sin `ENTORNO_TEST=aislado`, ni un directorio, una suite completa o un `APP_ENV` distinto de `testing`. Con `ENTORNO_TEST=aislado` y `CONEXIONES_REALES`, solo si el dev lo elige en «Acciones propuestas».
 
 ## Paso 7: Generar tests faltantes (solo si Paso 6 pasó y la cobertura es insuficiente)
 
@@ -211,7 +211,7 @@ Para cada gap detectado:
 - **Usar fixtures de `tests/fixtures/api/` en websites** y factories existentes en backend. Nada de JSON enorme escrito dentro de los tests
 - **Estilo de assertions** debe coincidir con tests existentes del mismo dominio (no introducir `chai`/`should` si el proyecto usa `expect` de vitest, etc.)
 - **Nunca** usar `RefreshDatabase` ni `DatabaseMigrations` en un test generado: lanzan `migrate:fresh` sobre la BD que haya configurada, y en algún proyecto esa BD es la de producción
-- **Nunca** generar un test que llegue a una de `CONEXIONES_REALES` (`DB::connection('…')` o un modelo con esa `$connection`). Si el código sin cubrir la usa, ese hueco no se cubre y se informa
+- **Nunca** generar un test que llegue a una de `CONEXIONES_REALES` (`DB::connection('…')` o un modelo con esa `$connection`). Si el código sin cubrir la usa, ese hueco no se cubre y se informa. Con `CONEXIONES_REALES=desconocido`, ningún test generado usa una conexión distinta de la por defecto
 
 ## Paso 8: Formato de salida
 
@@ -266,7 +266,7 @@ El informe termina siempre en este orden: incidencias, «Fallos ajenos al diff»
 ¿Aplico alguna? Indica los números.
 ```
 
-Con `CONEXIONES_REALES`, la acción para ejecutar los tests es:
+Con `ENTORNO_TEST=aislado` y `CONEXIONES_REALES`, la acción para ejecutar los tests es:
 
 ```
 N. **Ejecutar los tests del diff** aunque `config/database.php` tenga conexiones a servidores reales ({CONEXIONES_REALES}): `{orden del Paso 6}`. Solo si ninguno de estos tests llega a esas conexiones: {tests}

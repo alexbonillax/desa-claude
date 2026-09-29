@@ -638,6 +638,20 @@ class LocalWriteTest(Project):
         self.assertIn('ERROR=error de red: IncompleteRead', err)
 
 
+class RotoTest(Project):
+    def test_upsert_y_delete_corrigen_un_valor_roto(self):
+        es = self.write('packages/i18n/src/locales/es/translations.json', '{\n  "a": "A",\n  "bad": "\\ud83d"\n}\n')
+        api = FakeApi(['es'], {'app': [term(1, 'app', 'a', es='A'), term(2, 'app', 'bad', es='x')]})
+        code, out, err = self.run_main(['upsert', '--ns', 'app', '--code', 'bad', '--values', '-', '--apply'], api, stdin='{"es": "Bien"}')
+        self.assertEqual(code, 0, err)
+        self.assertIn('CAMBIA_FORMATO=1\n', out)
+        self.assertEqual(json.loads(es.read_text()), {'a': 'A', 'bad': 'Bien'})
+        es.write_text('{\n  "a": "A",\n  "bad": "\\ud83d"\n}\n')
+        code, out, err = self.run_main(['delete', '--ns', 'app', '--code', 'bad', '--apply'], api)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(es.read_text()), {'a': 'A'})
+
+
 class BackendFixesTest(Project):
     def setUp(self):
         super().setUp()
