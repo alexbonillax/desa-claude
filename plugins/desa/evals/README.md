@@ -17,7 +17,7 @@ claude plugin eval plugins/desa --scaffold --allow-tools Bash Edit --max-cost-us
 | `triage-tipo-a` | Un cambio de alcance claro sale en el formato A de tres líneas y va a `/desa:plan` (1.15.0) | pasa |
 | `translations-desde-claude-md` | Si el `CLAUDE.md` lo pide, se invoca `/desa:translations` y nadie edita los ficheros de idioma a mano | pasa |
 | `update-no-se-dispara` | El modelo no lanza `/desa:update` por su cuenta (1.11.0) | pasa |
-| `magic-factorial-no-se-dispara` | Una pregunta sobre el balance no dispara `/desa:magic-factorial` | **falla** hasta que se decida su diseño (ver la auditoría) |
+| `magic-factorial-no-se-dispara` | Una pregunta sobre el balance no dispara `/desa:magic-factorial` | **falla** a propósito: magic-factorial queda fuera de la auditoría por decisión del autor |
 
 Ningún caso llama a la API real de Grupo Desa. El de translations no tiene Bash, así que la skill no puede ejecutar `terms.py` aunque haya un token en la máquina, y los que tienen Bash (review y plan) usan skills que no llaman a la API. Un caso nuevo que necesite la API tiene que simularla: nunca con el token de nadie.
 

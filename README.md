@@ -75,7 +75,7 @@ Revisa código antes de commits o PRs aplicando los estándares del equipo. Dete
 
 Reporta incidencias agrupadas por severidad (Crítico / Importante / Menor) con referencia a fichero y línea y al criterio `#N`. Los criterios están en `plugins/desa/references/`, uno por stack.
 
-Después ejecuta los tests de los ficheros del diff. En backend, solo si el entorno de tests usa una BD sqlite aislada, siempre con `APP_ENV=testing` y nunca la suite entera ni un directorio. Si un test falla, dice si es una regresión o un test desactualizado y propone la corrección al final del informe sin tocar nada. Si hay líneas nuevas sin cubrir, genera tests y deja en staging los que crea y los que modifica si no tenían cambios tuyos, sin commit. La cabecera del informe dice siempre qué se revisó, qué tests se ejecutaron y la cobertura del diff, también cuando no se pudo ejecutar nada.
+Después ejecuta los tests de los ficheros del diff. En backend, solo si el entorno de tests usa una BD sqlite aislada, siempre con `APP_ENV=testing` y nunca la suite entera ni un directorio. Si `config/database.php` tiene conexiones a servidores reales, como en grupodesa-backend, no los ejecuta sola: te lo ofrece al final del informe. Si un test falla, dice si es una regresión o un test desactualizado y propone la corrección al final del informe sin tocar nada. Si hay líneas nuevas sin cubrir, genera tests y deja en staging los que crea y los que modifica si no tenían cambios tuyos, sin commit. La cabecera del informe dice siempre qué se revisó, qué tests se ejecutaron y la cobertura del diff, también cuando no se pudo ejecutar nada.
 
 ### /desa:wiki
 
@@ -98,7 +98,7 @@ Gestiona los terms de traducción vía API y sincroniza los ficheros de idioma d
 /desa:translations sincroniza
 ```
 
-Todo pasa por `scripts/terms.py`: sin `--apply` solo enseña lo que haría, escribe los ficheros con el formato de grupodesa-front y grupodesa-backend (si un proyecto usa otro, el dry-run lo marca), escapa bien los valores en PHP, lee los PHP sin ejecutarlos y no escribe nada si la API da un error. Pide confirmación antes de sobrescribir traducciones, de publicar traducciones propuestas por Claude, o de sincronizar si hay bajas, cambios sin commitear o ficheros que cambiarían de formato.
+Todo pasa por `scripts/terms.py`: sin `--apply` solo enseña lo que haría, escribe los ficheros con el formato de grupodesa-front y grupodesa-backend (si un proyecto usa otro, el dry-run lo marca), escapa bien los valores en PHP, lee los PHP sin ejecutarlos y no escribe nada si la API da un error. Pide confirmación antes de sobrescribir traducciones, de publicar traducciones propuestas por Claude, de reescribir ficheros que cambiarían de formato, o de sincronizar si hay bajas o cambios sin commitear.
 
 ### /desa:update
 
@@ -106,7 +106,7 @@ Ver «Actualización».
 
 ### /desa:magic-factorial
 
-Crea, corrige y cuadra fichajes en Factorial usando la API interna de Factorial con las cookies de sesión del navegador. Escribe en el registro oficial de jornada. Hay una decisión pendiente sobre su diseño: ver `docs/auditorias/2026-09-28-skills-opus-5-5.md`.
+Crea, corrige y cuadra fichajes en Factorial usando la API interna de Factorial con las cookies de sesión del navegador. Escribe en el registro oficial de jornada.
 
 ## Token de la API (wiki y translations)
 

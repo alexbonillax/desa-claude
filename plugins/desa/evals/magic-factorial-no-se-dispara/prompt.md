@@ -1,5 +1,5 @@
 ---
-tags: [activacion, pendiente-decision]
+tags: [activacion, fuera-de-alcance]
 runs: 3
 max_turns: 6
 allowed_tools: [Read, Skill]

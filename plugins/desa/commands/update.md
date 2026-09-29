@@ -20,9 +20,10 @@ Actualiza el plugin Desa a la última versión publicada y dice qué ha cambiado
 
     - el `gitCommitSha` de `desa@desa` en `~/.claude/plugins/installed_plugins.json`, y el `installLocation` de `desa` en `~/.claude/plugins/known_marketplaces.json`, que es el clon del marketplace (normalmente `~/.claude/plugins/marketplaces/desa`).
 
-2. Comprobar que el clon del marketplace no tiene trabajo sin subir:
+2. Comprobar que el clon del marketplace no tiene trabajo sin subir. Primero `fetch`, porque Claude Code actualiza el clon con `git pull origin HEAD`, que no mueve `origin/main`: sin él, todo lo que llegó en actualizaciones anteriores parecería trabajo sin subir.
 
     ```bash
+    git -C {installLocation} fetch origin
     git -C {installLocation} status --porcelain
     git -C {installLocation} log --oneline @{u}..HEAD
     ```
@@ -49,5 +50,5 @@ Las órdenes `git -C …` no están preaprobadas, porque la ruta y el commit cam
 
 ## Qué decir al usuario
 
-- **Versión nueva**: «Plugin Desa actualizado de X a Y.» Después, como mucho una línea por cada versión posterior a X, sacada del `CHANGELOG.md` de `installLocation`. Si falta alguna entrada, listar en su lugar `git -C {installLocation} log --oneline {gitCommitSha del paso 1}..@{u} -- plugins/desa`; si git no encuentra ese commit (el clon se rehízo con poca profundidad), decir que no se puede listar. Terminar con: «Ejecuta `/reload-plugins` (si avisa por la caché del prompt, `/reload-plugins --force`) o reinicia la sesión; hasta entonces, esta sesión sigue con las skills de la versión anterior.» Es una indicación para el usuario: el modelo no puede ejecutarlo.
-- **Misma versión**: «Ya tenías la última versión (X).» Si la versión cargada en la sesión (paso 1) es otra, añadir que esta sesión sigue con esa y dar la misma indicación de `/reload-plugins`. Si `git -C {installLocation} log --oneline {gitCommitSha}..@{u} -- plugins/desa` muestra commits, explicar que se publicaron cambios sin subir `version` en `plugin.json` y ofrecer el procedimiento del README (borrar `~/.claude/plugins/cache/desa` y reinstalar). No ejecutarlo sin confirmación.
+- **Versión nueva**: «Plugin Desa actualizado de X a Y.» Después, como mucho una línea por cada versión posterior a X, sacada del `CHANGELOG.md` de `installLocation`. Si falta alguna entrada, listar en su lugar `git -C {installLocation} log --oneline {gitCommitSha del paso 1}..HEAD -- plugins/desa` (el paso 2 ya ha comprobado que no hay commits locales); si git no encuentra ese commit (el clon se rehízo con poca profundidad), decir que no se puede listar. Terminar con: «Ejecuta `/reload-plugins` (si avisa por la caché del prompt, `/reload-plugins --force`) o reinicia la sesión; hasta entonces, esta sesión sigue con las skills de la versión anterior.» Es una indicación para el usuario: el modelo no puede ejecutarlo.
+- **Misma versión**: «Ya tenías la última versión (X).» Si la versión cargada en la sesión (paso 1) es otra, añadir que esta sesión sigue con esa y dar la misma indicación de `/reload-plugins`. Si `git -C {installLocation} log --oneline {gitCommitSha}..HEAD -- plugins/desa` muestra commits, explicar que se publicaron cambios sin subir `version` en `plugin.json` y ofrecer el procedimiento del README (borrar `~/.claude/plugins/cache/desa` y reinstalar). No ejecutarlo sin confirmación.

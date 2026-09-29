@@ -124,7 +124,7 @@ def php_str(s):
 
 
 def gen_php(d):
-    w = max(len(php_str(k)) for k in d)
+    w = max((len(php_str(k)) for k in d), default=0)
     lines = ''.join(f'    {php_str(k).ljust(w)} => {php_str(v)},\n' for k, v in sorted(d.items()))
     return '<?php\n\nreturn array(\n' + lines + ');\n'
 
@@ -159,7 +159,7 @@ def _dq(body):
             m = re.match(r'[0-7]{1,3}', body[i + 1:])
             out.append(int(m.group(0), 8) & 0xFF)
             i += 1 + len(m.group(0))
-        elif n == 'x' and re.match(r'[0-9A-Fa-f]', body[i + 2:i + 3]):
+        elif n in 'xX' and re.match(r'[0-9A-Fa-f]', body[i + 2:i + 3]):
             m = re.match(r'[0-9A-Fa-f]{1,2}', body[i + 2:])
             out.append(int(m.group(0), 16))
             i += 2 + len(m.group(0))
@@ -496,11 +496,12 @@ def _local_plan(proj, ns, code, values, remove=False):
     if proj['kind'] == 'backend' and ns not in local_namespaces(proj):
         print(f'AVISO=el namespace {ns} no existe en local; se queda solo en la API (sync --include-ns {ns} para crearlo)')
         return []
-    writes = []
+    writes, restyled = [], []
     langs = sorted(set(local_langs(proj)) | (set() if remove else set(values)))
     for lang in langs:
         path = file_for(proj, lang, ns)
-        current = read_file(path) or {}
+        original = read_file(path)
+        current = dict(original or {})
         if remove:
             if code not in current:
                 continue
@@ -515,6 +516,12 @@ def _local_plan(proj, ns, code, values, remove=False):
             if proj['kind'] == 'frontend' and not path.parent.exists():
                 print(f'AVISO=idioma nuevo {lang}: registrarlo en packages/i18n/src/index.js y en la configuración de i18n de web y mobile')
         writes.append((path, render(path, current)))
+        if original is not None and render(path, original) != path.read_bytes():
+            restyled.append(rel(proj, path))
+    if writes:
+        print(f'CAMBIA_FORMATO={len(restyled)}')
+    if restyled:
+        print(f"AVISO=cambia también el formato de {', '.join(restyled)}: se reescribe con el de terms.py y se pierden comentarios y estilo")
     return writes
 
 

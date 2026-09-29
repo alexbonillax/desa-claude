@@ -199,7 +199,8 @@ class FormatTest(unittest.TestCase):
         h, t = '<?php\nreturn [\n', '];\n'
         cases = [h + '"a" => "\\xC3\\xA9\\303\\251\\u{1F600}\\u{0000e9}",\n' + t, h + '"a" => "\\e\\f\\v\\8\\9\\q\\{\\x\\u0041",\n' + t,
                  h + '"a" => "$5 y $ y $[x] {x} \\$x \\{$",\n' + t, h + "'a' => 'l\\'e\\\\\\n\\x',\n" + t,
-                 "<?php\r\n# c\r\nreturn [\r\n'a' => \"x\r\ny\",\r\n];\r\n", '\ufeff<?php\nreturn array("a" => "b");\n']
+                 "<?php\r\n# c\r\nreturn [\r\n'a' => \"x\r\ny\",\r\n];\r\n", '\ufeff<?php\nreturn array("a" => "b");\n',
+                 h + '"a" => "Pulsa \\X41\\X4a\\XC3\\XA9",\n' + t]
         with tempfile.TemporaryDirectory() as d:
             for n, text in enumerate(cases):
                 p = pathlib.Path(d, f'{n}.php')
@@ -654,6 +655,32 @@ class BackendFixesTest(Project):
         self.assertEqual(code, 0, err)
         self.assertEqual(terms.load_php(self.app), {'a': 'A', 'nuevo': 'Nuevo', 'ok': 'éxito é'})
         self.assertIn('"éxito é"', self.app.read_text())
+
+    def test_escape_hexadecimal_en_mayuscula(self):
+        self.assertEqual(terms.parse_php('<?php\nreturn ["b" => "Pulsa \\X41 \\XC3\\XA9"];\n'), {'b': 'Pulsa A é'})
+
+    def test_array_vacio_en_un_fichero_de_idioma(self):
+        self.app.write_text('<?php\n\nreturn [];\n')
+        api = FakeApi(['es'], {'app': [term(1, 'app', 'a', es='A')]})
+        code, out, err = self.run_main(['sync'], api)
+        self.assertEqual(code, 0, err)
+        self.assertIn('resources/lang/es/app.php: +1 ~0 -0', out)
+        self.assertEqual(terms.parse_php(terms.gen_php({})), {})
+
+    def test_upsert_avisa_si_cambia_el_formato(self):
+        api = FakeApi(['es'], {'app': [term(1, 'app', 'a', es='A')]})
+        code, out, err = self.run_main(['upsert', '--ns', 'app', '--code', 'nuevo', '--values', '-'], api, stdin='{"es": "Nuevo"}')
+        self.assertEqual(code, 0, err)
+        self.assertIn('CAMBIA_FORMATO=0\n', out)
+        self.app.write_text("<?php\n\nreturn [\n    // saludo\n    'a' => 'A',\n];\n")
+        code, out, err = self.run_main(['upsert', '--ns', 'app', '--code', 'nuevo', '--values', '-'], api, stdin='{"es": "Nuevo"}')
+        self.assertEqual(code, 0, err)
+        self.assertIn('CAMBIA_FORMATO=1\n', out)
+        self.assertIn('AVISO=cambia también el formato de resources/lang/es/app.php', out)
+        self.app.write_text("<?php\n\nreturn [\n    // saludo\n    'a' => 'A',\n    'b' => 'B',\n];\n")
+        code, out, err = self.run_main(['delete', '--ns', 'app', '--code', 'a'], api)
+        self.assertEqual(code, 0, err)
+        self.assertIn('CAMBIA_FORMATO=1\n', out)
 
     def test_php_que_no_da_utf8_pide_allow_php_y_no_toca_la_api(self):
         self.app.write_text('<?php\n\nreturn array(\n    "a"  => "A",\n    "ok" => "\\xE9xito",\n);\n')

@@ -39,6 +39,12 @@ expect() {
     FAIL=$((FAIL + 1)); printf 'FALLO: %s\n  esperaba: %s\n  salida: %s\n' "$1" "$2" "$(printf '%s' "$OUT" | tr '\n' ' ')"; fi
 }
 
+# laravel VERSION: el vendor/laravel/framework mínimo del que test-context.sh lee la versión.
+laravel() {
+  mkdir -p vendor/laravel/framework/src/Illuminate/Foundation
+  printf "<?php\nclass Application\n{\n    const VERSION = '%s';\n}\n" "$1" > vendor/laravel/framework/src/Illuminate/Foundation/Application.php
+}
+
 fake_php none "Json"
 fake_php xdebug "Xdebug"
 fake_php pcov "pcov"
@@ -107,6 +113,7 @@ expect "desde subdirectorio" "RUNNER=phpunit"
 
 # Entorno de tests efectivo del backend con APP_ENV=testing
 proj env-phpunit artisan composer.json
+laravel 12.53.0
 printf '<phpunit>\n  <php>\n    <env name="APP_ENV" value="testing"/>\n    <env name="DB_CONNECTION" value="sqlite"/>\n    <env name="DB_DATABASE" value=":memory:"/>\n  </php>\n</phpunit>\n' > phpunit.xml
 printf 'DB_CONNECTION=mysql\nDB_DATABASE=grupodesa\n' > .env
 PATH="$ROOT/bin-none:$PATH" run
@@ -114,9 +121,9 @@ expect "phpunit.xml con sqlite" "ENTORNO_TEST=aislado (DB_CONNECTION=sqlite desd
 PATH="$ROOT/bin-none:$PATH" runenv DB_CONNECTION=mysql
 expect "la variable del proceso gana al <env>" "ENTORNO_TEST=no-aislado (DB_CONNECTION=mysql desde la variable DB_CONNECTION del entorno)"
 PATH="$ROOT/bin-none:$PATH" runenv DATABASE_URL=mysql://u:p@db.example.com/grupodesa
-expect "DATABASE_URL en el entorno" "ENTORNO_TEST=no-aislado (DATABASE_URL definida desde la variable DATABASE_URL del entorno: la URL decide el driver)"
+expect "DATABASE_URL en el entorno" "ENTORNO_TEST=no-aislado (DATABASE_URL definida desde la variable DATABASE_URL del entorno: la URL decide el driver y la base de datos)"
 PATH="$ROOT/bin-none:$PATH" runenv DB_URL=sqlite:///tmp/x.sqlite
-expect "DB_URL de sqlite no cuenta" "ENTORNO_TEST=aislado (DB_CONNECTION=sqlite desde phpunit.xml; DB_DATABASE=:memory: desde phpunit.xml)"
+expect "DB_URL de sqlite pisa DB_DATABASE" "ENTORNO_TEST=no-aislado (DB_URL definida desde la variable DB_URL del entorno: la URL decide el driver y la base de datos)"
 PATH="$ROOT/bin-none:$PATH" runenv DB_DATABASE=grupodesa
 expect "DB_DATABASE del entorno" "ENTORNO_TEST=no-aislado (sqlite con DB_DATABASE=grupodesa desde la variable DB_DATABASE del entorno: puede ser la BD de desarrollo)"
 
@@ -138,6 +145,7 @@ PATH="$ROOT/bin-none:$PATH" run
 expect "sqlite sin DB_DATABASE" "ENTORNO_TEST=no-aislado (sqlite sin DB_DATABASE: Laravel usaría database/database.sqlite, que puede ser la BD de desarrollo)"
 
 proj env-cache artisan composer.json
+laravel 12.53.0
 printf '<phpunit>\n  <php>\n    <env name="DB_CONNECTION" value="sqlite"/>\n    <env name="DB_DATABASE" value=":memory:"/>\n  </php>\n</phpunit>\n' > phpunit.xml
 mkdir -p bootstrap/cache && printf '<?php return [];\n' > bootstrap/cache/config.php
 PATH="$ROOT/bin-none:$PATH" run
@@ -150,11 +158,13 @@ PATH="$ROOT/bin-none:$PATH" run
 expect "sin caché vuelve a aislado" "ENTORNO_TEST=aislado (DB_CONNECTION=sqlite desde phpunit.xml; DB_DATABASE=:memory: desde phpunit.xml)"
 
 proj env-dist artisan composer.json
+laravel 12.53.0
 printf '<phpunit>\n  <php>\n    <env name="DB_CONNECTION" value="sqlite"/>\n    <env name="DB_DATABASE" value=":memory:"/>\n  </php>\n</phpunit>\n' > phpunit.dist.xml
 PATH="$ROOT/bin-none:$PATH" run
 expect "phpunit.dist.xml" "ENTORNO_TEST=aislado (DB_CONNECTION=sqlite desde phpunit.dist.xml; DB_DATABASE=:memory: desde phpunit.dist.xml)"
 
 proj env-comentado artisan composer.json
+laravel 12.53.0
 printf '<phpunit>\n  <php>\n    <!-- <env name="DB_CONNECTION" value="sqlite"/> -->\n  </php>\n</phpunit>\n' > phpunit.xml
 printf 'APP_NAME=x\nDB_CONNECTION=mysql\nDB_HOST=db.example.amazonaws.com\n' > .env
 PATH="$ROOT/bin-none:$PATH" run
@@ -167,9 +177,9 @@ PATH="$ROOT/bin-none:$PATH" run
 expect ".env.testing con export, comentario y comillas simples" "ENTORNO_TEST=aislado (DB_CONNECTION=sqlite desde .env.testing; DB_DATABASE=:memory: desde .env.testing)"
 printf 'DB_CONNECTION=sqlite\nDB_DATABASE=:memory:\nDATABASE_URL=mysql://u:p@db.example.com/x\n' > .env.testing
 PATH="$ROOT/bin-none:$PATH" run
-expect "DATABASE_URL en .env.testing" "ENTORNO_TEST=no-aislado (DATABASE_URL definida desde .env.testing: la URL decide el driver)"
+expect "DATABASE_URL en .env.testing" "ENTORNO_TEST=no-aislado (DATABASE_URL definida desde .env.testing: la URL decide el driver y la base de datos)"
 PATH="$ROOT/bin-none:$PATH" runenv DB_CONNECTION=mysql
-expect "variable del proceso frente a .env.testing" "ENTORNO_TEST=no-aislado (DATABASE_URL definida desde .env.testing: la URL decide el driver)"
+expect "variable del proceso frente a .env.testing" "ENTORNO_TEST=no-aislado (DATABASE_URL definida desde .env.testing: la URL decide el driver y la base de datos)"
 printf 'DB_CONNECTION=sqlite\nDB_DATABASE=:memory:\n' > .env.testing
 PATH="$ROOT/bin-none:$PATH" runenv DB_CONNECTION=mysql
 expect "la variable del proceso gana a .env.testing" "ENTORNO_TEST=no-aislado (DB_CONNECTION=mysql desde la variable DB_CONNECTION del entorno)"
@@ -186,6 +196,93 @@ expect "sqlite del entorno" "ENTORNO_TEST=no-aislado (DB_CONNECTION=sqlite desde
 proj env-nada artisan composer.json phpunit.xml
 PATH="$ROOT/bin-none:$PATH" run
 expect "sin DB_CONNECTION en ningún sitio" "ENTORNO_TEST=desconocido (no se encuentra DB_CONNECTION)"
+
+# <env> repetido: PHPUnit 9+ se queda con el primero y el 7.5 con el último
+proj env-duplicado artisan composer.json
+laravel 12.53.0
+printf '<phpunit>\n  <php>\n    <env name="DB_CONNECTION" value="mysql"/>\n    <env name="DB_CONNECTION" value="sqlite"/>\n    <env name="DB_DATABASE" value=":memory:"/>\n  </php>\n</phpunit>\n' > phpunit.xml
+PATH="$ROOT/bin-none:$PATH" run
+expect "<env> repetido con valores distintos" "ENTORNO_TEST=no-aislado (phpunit.xml define DB_CONNECTION varias veces con valores distintos)"
+printf '<phpunit>\n  <php>\n    <env name="DB_CONNECTION" value="sqlite"/>\n    <env name="DB_CONNECTION" value="sqlite"/>\n    <env name="DB_URL" value="sqlite::memory:"/>\n  </php>\n</phpunit>\n' > phpunit.xml
+PATH="$ROOT/bin-none:$PATH" run
+expect "<env> repetido con el mismo valor y URL de sqlite en memoria" "ENTORNO_TEST=aislado (DB_CONNECTION=sqlite desde phpunit.xml; URL de sqlite en memoria)"
+
+# El fichero sqlite de tests es el mismo que el de desarrollo
+proj env-mismo-fichero artisan composer.json phpunit.xml
+laravel 12.53.0
+printf 'DB_CONNECTION=sqlite\nDB_DATABASE=%s/database/dev.sqlite\n' "$(pwd -P)" > .env
+cp .env .env.testing
+PATH="$ROOT/bin-none:$PATH" run
+expect "cp .env .env.testing" "ENTORNO_TEST=no-aislado (sqlite con DB_DATABASE=$(pwd -P)/database/dev.sqlite desde .env.testing: es el mismo fichero que la BD de desarrollo)"
+printf 'DB_CONNECTION=sqlite\nDB_DATABASE=./database/database.sqlite\n' > .env.testing
+PATH="$ROOT/bin-none:$PATH" run
+expect "el database/database.sqlite por defecto" "ENTORNO_TEST=no-aislado (sqlite con DB_DATABASE=./database/database.sqlite desde .env.testing: es el mismo fichero que la BD de desarrollo)"
+printf 'DB_CONNECTION=sqlite\nDB_DATABASE=database/testing.sqlite\n' > .env.testing
+PATH="$ROOT/bin-none:$PATH" run
+expect "un fichero solo de tests" "ENTORNO_TEST=aislado (DB_CONNECTION=sqlite desde .env.testing; DB_DATABASE=database/testing.sqlite desde .env.testing)"
+
+# Laravel 7 o anterior: con valores distintos no se sabe qué fuente gana
+proj env-laravel5 artisan composer.json
+laravel 5.8.38
+printf '<phpunit>\n  <php>\n    <server name="DB_CONNECTION" value="sqlite"/>\n    <server name="DB_DATABASE" value=":memory:"/>\n  </php>\n</phpunit>\n' > phpunit.xml
+PATH="$ROOT/bin-none:$PATH" run
+expect "laravel 5.8 con <server> y sin variables" "ENTORNO_TEST=aislado (DB_CONNECTION=sqlite desde phpunit.xml (<server>); DB_DATABASE=:memory: desde phpunit.xml (<server>))"
+PATH="$ROOT/bin-none:$PATH" runenv DB_CONNECTION=mysql
+expect "laravel 5.8 con <server> y la variable del proceso" "ENTORNO_TEST=no-aislado (phpunit.xml y la variable del entorno dan valores distintos a DB_CONNECTION (Laravel 5))"
+rm -rf vendor
+PATH="$ROOT/bin-none:$PATH" runenv DB_DATABASE=gdapps
+expect "sin vendor, como Laravel antiguo" "ENTORNO_TEST=no-aislado (phpunit.xml y la variable del entorno dan valores distintos a DB_DATABASE (Laravel desconocido))"
+
+# Conexiones con un servidor escrito en config/database.php
+proj env-conexiones artisan composer.json
+laravel 12.53.0
+printf '<phpunit>\n  <php>\n    <env name="DB_CONNECTION" value="sqlite"/>\n    <env name="DB_DATABASE" value=":memory:"/>\n  </php>\n</phpunit>\n' > phpunit.xml
+mkdir -p config
+cat > config/database.php <<'EOF'
+<?php
+
+return [
+    'default' => env('DB_CONNECTION', 'sqlite'),
+    'connections' => [
+        // 'comentada' => ['host' => 'db.example.com'],
+        'externa' => [
+            'driver' => 'mysql',
+            'host' => 'db.example.com',
+            'database' => 'PROD',
+        ],
+        'odbc' => [
+            'driver' => 'odbc',
+            'dsn' => 'Driver=Snowflake;Server=x.snowflakecomputing.com',
+        ],
+        'por-defecto' => [
+            'driver' => 'mysql',
+            'host' => env('OTRA_HOST', 'rds.example.com'),
+        ],
+        'mysql' => [
+            'driver' => 'mysql',
+            'url' => env('DB_URL'),
+            'host' => env('DB_HOST', '127.0.0.1'),
+            'options' => extension_loaded('pdo_mysql') ? array_filter([
+                PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+            ]) : [],
+        ],
+        'sqlite' => [
+            'driver' => 'sqlite',
+            'database' => env('DB_DATABASE', database_path('database.sqlite')),
+        ],
+    ],
+    'redis' => [
+        'default' => ['host' => env('REDIS_HOST', 'cache.example.com')],
+    ],
+];
+EOF
+PATH="$ROOT/bin-none:$PATH" run
+expect "conexiones reales: el entorno sigue aislado" "ENTORNO_TEST=aislado (DB_CONNECTION=sqlite desde phpunit.xml; DB_DATABASE=:memory: desde phpunit.xml)"
+expect "conexiones reales: host, dsn y env() con un host por defecto" "CONEXIONES_REALES=externa odbc por-defecto"
+rm config/database.php
+PATH="$ROOT/bin-none:$PATH" run
+expect_no_line() { if printf '%s\n' "$OUT" | grep -q "^$2"; then FAIL=$((FAIL + 1)); echo "FALLO: $1"; else PASS=$((PASS + 1)); fi; }
+expect_no_line "sin config/database.php no hay CONEXIONES_REALES" "CONEXIONES_REALES="
 
 proj env-web next.config.js
 run

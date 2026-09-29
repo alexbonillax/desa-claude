@@ -450,6 +450,41 @@ git checkout -q -- apps/web/src/b.js && rm apps/web/src/nuevo.js
 run --path apps/web/src/a.js
 if printf '%s\n' "$OUT" | grep -q '^AVISO='; then ko "path con árbol limpio no avisa"; else ok; fi
 
+# --path: un rename que cruza el límite de la ruta cuenta como cambio de fuera
+new_repo path-rename "${MONO[@]}"
+git mv apps/web/src/a.js packages/core/a.js
+run --path apps/web/src
+expect "rename hacia fuera de la ruta: aviso" "AVISO=hay 1 ficheros con cambios sin commitear fuera de apps/web/src, que los tests del Paso 6 también verán"
+git reset -q --hard
+git mv packages/core/c.js apps/web/src/c.js
+echo m > apps/mobile.txt
+run --path apps/web/src
+expect "rename desde fuera más otro cambio: los dos" "AVISO=hay 2 ficheros con cambios sin commitear fuera de apps/web/src, que los tests del Paso 6 también verán"
+
+# PR en un clon superficial con la cabeza y la base sin historia común
+new_repo pr-sinbase "${MONO[@]}"
+git checkout -qb feat && echo y >> apps/web/src/a.js && git commit -qam feat
+git checkout -q main && echo z >> packages/core/c.js && git commit -qam main2
+git clone -q --depth 1 --branch feat "file://$ROOT/pr-sinbase" "$ROOT/pr-sinbase-shallow" && cd "$ROOT/pr-sinbase-shallow" || exit 1
+git fetch -q --depth 1 origin main:refs/remotes/origin/main
+SB_FEAT=$(git rev-parse HEAD); SB_MAIN=$(git rev-parse origin/main)
+mkdir -p "$ROOT/bin4"
+cat > "$ROOT/bin4/gh" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+  "pr diff 5 --name-only") echo apps/web/src/a.js ;;
+  *headRefOid*) echo "$SB_FEAT" ;;
+  *baseRefName*) echo main ;;
+  *baseRefOid*) echo "$SB_MAIN" ;;
+esac
+EOF
+chmod +x "$ROOT/bin4/gh"
+PATH="$ROOT/bin4:$PATH" run --pr 5
+expect "pr sin merge-base: en worktree" "PR_EN_WORKTREE=si"
+expect "pr sin merge-base: sin DIFF_U0" "DIFF_U0="
+expect_no "pr sin merge-base: sin PR_BASE" "PR_BASE=origin/main"
+expect "pr sin merge-base: aviso" "AVISO=la base de la PR no tiene merge-base con HEAD en este clon (superficial: git fetch --unshallow, o fetch-depth: 0 en GitHub Actions), así que no hay DIFF_U0"
+
 run --otra
 expect_code "argumento no reconocido" 64
 

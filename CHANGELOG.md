@@ -5,6 +5,33 @@ All notable changes to the `desa` plugin will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.18.0] — 2026-09-29
+
+Correcciones de la verificación adversarial de la 1.17.0.
+
+### Security
+
+- **Conexiones a servidores reales en `config/database.php`** — `ENTORNO_TEST` solo mira la conexión por defecto. En grupodesa-backend sale «aislado» (sqlite en memoria), pero `spyro_transfer`, `gdapps` y `snowflake-admin` tienen el servidor escrito en el propio fichero, son de producción, y el código escribe en ellas (`SpyroService` hace `DB::connection('spyro_transfer')->insert(...)`). `test-context.sh` imprime ahora `CONEXIONES_REALES` con las conexiones que tienen un host no local, un `dsn` o una `url` escritos en el fichero, o como valor por defecto de `env()`. Con ellas, review no ejecuta los tests sola: lo ofrece en «Acciones propuestas», y ningún test generado puede llegar a esas conexiones. Hoy salen en grupodesa-backend y desa-connect (las tres) y en gdapps (`desaverse`).
+- **`ENTORNO_TEST`, más casos en que daba «aislado» sin serlo**:
+  - una `DB_URL` o `DATABASE_URL` de sqlite pisa `DB_DATABASE`. Ahora solo cuenta una URL de sqlite en memoria fijada en `phpunit.xml` o `.env.testing`;
+  - con un `<env>` repetido, PHPUnit 9 y posteriores se quedan con el primero y el 7.5 con el último. Con valores distintos ya no cuenta como aislado;
+  - un `DB_DATABASE` de tests que apunta al mismo fichero que la BD de desarrollo (tras `cp .env .env.testing`, o `database/database.sqlite`);
+  - con Laravel 7 o anterior, el orden entre `<server>`, la variable del proceso y `<env>` depende de `variables_order`. Si dan valores distintos, ya no cuenta como aislado.
+
+### Fixed
+
+- **`/desa:update` se quedaba bloqueado** — Claude Code actualiza el clon con `git pull origin HEAD`, que no mueve `origin/main`. Tras la primera actualización, el paso 2 veía como «commits sin subir» todo lo que había llegado, y los listados con `@{u}` salían vacíos. Ahora hace `git fetch origin` antes de comprobar, y los listados vuelven a `{gitCommitSha}..HEAD`.
+- **`terms.py`**:
+  - un fichero de idioma con un array vacío (`return [];`) hacía abortar el sync entero desde la 1.17.0;
+  - `\X41`, con la X en mayúscula, se leía distinto de PHP;
+  - upsert y delete también imprimen `CAMBIA_FORMATO` y avisan si reescribirían un fichero con otro formato, perdiendo sus comentarios. translations pide confirmación en ese caso.
+- **`diff-context.sh`**:
+  - un rename que cruza el límite de `--path` ya cuenta como cambio de fuera;
+  - en modo PR, si la base no tiene merge-base con HEAD (clon superficial), no da `PR_BASE` ni `DIFF_U0` y lo avisa, en vez de dar una orden que falla.
+- **Paso 7 de review** — Con un informe de cobertura por fichero de test, una línea está cubierta si algún informe le da `count` mayor que 0.
+- CHANGELOG 1.17.0: la orden de cobertura sigue saliendo con 0; lo que cambia es el `EXIT=` por fichero.
+- magic-factorial ya no aparece como pendiente de decisión en la auditoría, el README, los evals ni el CHANGELOG 1.16.0: queda fuera por decisión del autor. La skill no cambia.
+
 ## [1.17.0] — 2026-09-29
 
 Correcciones de la verificación adversarial de la 1.14.0 y la 1.15.0.
@@ -42,7 +69,7 @@ Correcciones de la verificación adversarial de la 1.14.0 y la 1.15.0.
   - `--save-content` comprueba el destino antes de la petición y no guarda nada si la respuesta no es un documento;
   - `--save-content` y `--content-from` conservan los saltos de línea (CRLF y CR sueltos), así que los párrafos que no se tocan viajan de verdad tal cual.
 - **Paso 6 de `/desa:review`: un fichero de test por ejecución** — PHPUnit 9 y 10 solo ejecutan el primer fichero que se les pasa e ignoran el resto sin avisar, así que con varios el verde era falso. La orden es ahora un bucle que imprime `EXIT=` por fichero.
-- **La orden de cobertura ya no sale siempre con 0** — Terminaba en `echo`, así que un fallo del runner llegaba como verde. Cada fichero tiene su `EXIT=` y su informe en el directorio `COV`.
+- **La orden de cobertura da un `EXIT=` por fichero** — Sigue terminando en `echo`, así que la llamada sale con 0 aunque falle el runner: el resultado se lee en las líneas `EXIT=`, y cada fichero deja su informe en el directorio `COV`.
 - **Paso 7**: los ficheros sin trackear cuentan enteros como líneas añadidas (no salen en `DIFF_U0`), y en modo PR sin base local las líneas añadidas salen del `gh pr diff`.
 - **Modo PR con `origin/{base}` desactualizado** — `diff-context.sh` usa como base el commit que da GitHub (`baseRefOid`). Con `origin/{base}` atrasado, el merge-base era antiguo y `DIFF_U0` metía commits ajenos a la PR. Si esa base no está en local, no da `PR_BASE` ni `DIFF_U0` y lo avisa.
 - **Clon superficial en GitHub Actions** — Con `fetch-depth: 1` no se puede reconocer el merge commit de la PR: ahora lo dice un `AVISO`, y review.md documenta que hace falta `fetch-depth: 2`.
@@ -70,7 +97,7 @@ Bloque 6 de la auditoría (`docs/auditorias/2026-09-28-skills-opus-5-5.md`): eva
 
 ### Added
 
-- **Evals en `plugins/desa/evals/`** para `claude plugin eval`, con fixtures de repos de juguete. Fijan fallos que ya se dieron: un cambio sin stagear solo en `apps/mobile` se revisa como mobile y cita #65 (el bug de `DIFF_FILES`); `/desa:plan` reconoce un websites; el formato A de triage; que translations se invoque cuando lo pide el `CLAUDE.md` y nadie edite a mano los ficheros de idioma; y que `/desa:update` no se lance sola. El de magic-factorial falla a propósito hasta que se decida su diseño. Están escritos con la documentación de `plugin eval` y sin ejecutar: la 2.1.236 aún no tiene el subcomando.
+- **Evals en `plugins/desa/evals/`** para `claude plugin eval`, con fixtures de repos de juguete. Fijan fallos que ya se dieron: un cambio sin stagear solo en `apps/mobile` se revisa como mobile y cita #65 (el bug de `DIFF_FILES`); `/desa:plan` reconoce un websites; el formato A de triage; que translations se invoque cuando lo pide el `CLAUDE.md` y nadie edite a mano los ficheros de idioma; y que `/desa:update` no se lance sola. El de magic-factorial falla a propósito: la skill queda fuera por decisión del autor. Están escritos con la documentación de `plugin eval` y sin ejecutar: la 2.1.236 aún no tiene el subcomando.
 - **CI en `.github/workflows/ci.yml`** — En cada PR y en cada push a `main`: las pruebas de `tests/`, `claude plugin validate --strict` del marketplace y del plugin, que la versión suba y tenga su entrada en el CHANGELOG si cambia `plugins/desa/`, y un aviso si alguna skill preaprueba intérpretes, red o git/gh completos.
 - **Entrada 1.9.0 del CHANGELOG**, que faltaba.
 

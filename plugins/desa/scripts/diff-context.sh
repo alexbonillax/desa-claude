@@ -98,15 +98,21 @@ read_names() {
   done < "$TMP"
 }
 
-# Entradas de git status en todo el árbol, sin contar las de herramientas sin trackear.
-dirty_total() {
-  local entry xy p n=0
+# Rutas con cambios de todo el árbol que quedan fuera de $1, sin contar las de herramientas
+# sin trackear. Un rename cuenta por sus dos rutas: puede cruzar el límite de la ruta.
+dirty_outside() {
+  local entry xy p orig q n=0 seen=$'\n'
   g status --porcelain=v1 -z --untracked-files=all > "$TMP" 2>/dev/null || { echo 0; return; }
   while IFS= read -r -d '' entry; do
-    xy=${entry:0:2}; p=${entry:3}
-    case "$xy" in R*|C*) IFS= read -r -d '' p ;; esac
-    [ "$xy" = "??" ] && is_tool "${entry:3}" && continue
-    n=$((n + 1))
+    xy=${entry:0:2}; p=${entry:3}; orig=""
+    case "$xy" in R*|C*) IFS= read -r -d '' orig ;; esac
+    [ "$xy" = "??" ] && is_tool "$p" && continue
+    for q in "$p" "$orig"; do
+      [ -n "$q" ] || continue
+      case "$q" in "$1"|"$1"/*) continue ;; esac
+      case "$seen" in *$'\n'"$q"$'\n'*) continue ;; esac
+      seen="$seen$q"$'\n'; n=$((n + 1))
+    done
   done < "$TMP"
   echo "$n"
 }
@@ -180,6 +186,10 @@ if [ "$MODE" = pr ]; then
     else
       WARN="sin la base de la PR en local no hay DIFF_U0 (git fetch origin ${BASE_REF:-su rama base})"
     fi
+    if [ -n "$PR_BASE" ] && ! git merge-base "$PR_BASE" HEAD >/dev/null 2>&1; then
+      WARN="${WARN:+$WARN; }la base de la PR no tiene merge-base con HEAD en este clon (superficial: git fetch --unshallow, o fetch-depth: 0 en GitHub Actions), así que no hay DIFF_U0"
+      PR_BASE=""
+    fi
     [ -n "$PR_BASE" ] && DIFF_U0="git diff --unified=0 $PR_BASE...HEAD"
   elif [ -n "$HEAD_PR" ] && [ -z "$STAGED$UNSTAGED" ] && [ "$(git rev-parse -q --verify HEAD^2 2>/dev/null)" = "$HEAD_PR" ]; then
     # checkout de GitHub Actions en pull_request: HEAD es el merge de la PR sobre su base.
@@ -213,7 +223,6 @@ else
   fi
 
   read_status ${PS[@]+"${PS[@]}"}
-  IN_PATH=$(printf '%s%s%s' "$STAGED" "$UNSTAGED" "$UNTRACKED" | grep . | sort -u | grep -c .)
 
   if [ -n "$STAGED" ]; then
     FUENTE=staged
@@ -258,8 +267,8 @@ else
     fi
     [ -z "$FILES" ] && FUENTE=ninguna && DIFF="" && DIFF_U0=""
   fi
-  if [ "$MODE" = path ]; then
-    OUT_PATH=$(( $(dirty_total) - IN_PATH ))
+  if [ "$MODE" = path ] && [ "$REL" != . ]; then
+    OUT_PATH=$(dirty_outside "$REL")
     [ "$OUT_PATH" -gt 0 ] && WARN="${WARN:+$WARN; }hay $OUT_PATH ficheros con cambios sin commitear fuera de $REL, que los tests del Paso 6 también verán"
   fi
 fi
