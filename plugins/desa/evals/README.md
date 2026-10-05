@@ -14,10 +14,13 @@ claude plugin eval plugins/desa --scaffold --allow-tools Bash Edit --max-cost-us
 |---|---|---|
 | `review-mobile-unstaged` | Un cambio sin stagear solo en `apps/mobile` se revisa como mobile y se cita #65 (bug de `DIFF_FILES`, 1.12.0) | pasa |
 | `plan-websites` | `/desa:plan` en un Next.js single-app aplica los criterios de websites y no termina en «unknown» (1.12.0) | pasa |
-| `triage-tipo-a` | Un cambio de alcance claro sale en el formato A de tres líneas y va a `/desa:plan` (1.15.0) | pasa |
+| `plan-ruta-a` | Un cambio de alcance claro sale como `**Ruta A**`, sin premio, presupuesto ni agentes (antes `triage-tipo-a`; 1.19.0) | sin ejecutar |
+| `plan-sintoma-acota` | Un síntoma sale como `**Ruta B**`, con premio y comprobación descalificante, y sin lanzar agentes (1.19.0) | sin ejecutar |
 | `translations-desde-claude-md` | Si el `CLAUDE.md` lo pide, se invoca `/desa:translations` y nadie edita los ficheros de idioma a mano | pasa |
 | `update-no-se-dispara` | El modelo no lanza `/desa:update` por su cuenta (1.11.0) | pasa |
 | `magic-factorial-no-se-dispara` | Una pregunta sobre el balance no dispara `/desa:magic-factorial` | **falla** a propósito: magic-factorial queda fuera de la auditoría por decisión del autor |
+
+Los graders `tool_used: Agent` con `min: 0` y `max: 0` solo pueden fallar si el caso lista `Agent` en `allowed_tools`: sin la herramienta, el modelo no puede lanzar agentes y el grader pasa siempre.
 
 Ningún caso llama a la API real de Grupo Desa. El de translations no tiene Bash, así que la skill no puede ejecutar `terms.py` aunque haya un token en la máquina, y los que tienen Bash (review y plan) usan skills que no llaman a la API. Un caso nuevo que necesite la API tiene que simularla: nunca con el token de nadie.
 

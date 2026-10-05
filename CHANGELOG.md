@@ -5,6 +5,42 @@ All notable changes to the `desa` plugin will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.19.0] — 2026-10-05
+
+`/desa:triage` se funde en `/desa:plan` y desaparece, y el plan dice con qué modelo, esfuerzo y cuántos agentes ejecutarlo. Sale de revisar 131 sesiones reales: el ~80 % de las peticiones de plan son de alcance claro, y en el ~20 % restante (síntomas y decisiones), sin triage, 6 de 8 lanzaron 7 agentes o más. Pero la mayor parte del exceso de agentes no venía de plan ni de triage: ultracode estaba activo en 82 de 88 sesiones con plan o triage, el 63 % de los agentes se lanzó sin ninguna skill desa activa, y el freno de triage no pasaba al turno siguiente (9 de 13 sesiones con triage tuvieron workflows después).
+
+### Changed
+
+- **`/desa:plan` empieza por una línea de ruta y perfil** (`**Ruta A · Perfil S** — …`):
+  - **A, alcance claro**: va directa al plan, sin premio, presupuesto ni tablas ([T-1]), y con 0 agentes por defecto;
+  - **B, síntoma, y C, decisión**: antes de planificar, la acota con las reglas de triage. Si no merece la pena, cierra con una página; si la merece, sigue al plan en la misma invocación, sin copiar y pegar y sin volver a explorar lo descartado;
+  - **Pull**: no entra en plan mode y propone `/desa:review` del diff, empezando por los ficheros que tocan las dos ramas;
+  - **Freno**: para lo que sobra y vuelve a dimensionar lo que queda. 5 de las 16 invocaciones de triage eran esto.
+- **Perfiles S, M, L y XL**, por señales observables de la petición. Fijan a la vez el tope de agentes de toda la tarea y con qué conviene implementar: Sonnet 5.5 en S y M (habría bastado en ~40 de 67 tareas acotadas), Opus 5.5 · xhigh en L y XL, y Workflow solo en XL y con el sí del usuario. Fable 5.1, solo si se pide.
+- **Sección «Ejecución» en el plan**: ruta, perfil, modelo y esfuerzo con su coste relativo, tope de agentes y confirmaciones por coste externo o escritura irreversible. Aprobar el plan aprueba el tope. La skill no puede cambiar el modelo ni el esfuerzo de la sesión (`/model` y `/effort` son del usuario, el frontmatter vale solo para el turno de la invocación y la herramienta del escritorio rechaza la propia sesión), así que da la orden exacta.
+- **Una sola parada por el modelo, y solo hacia arriba**: en L o XL con la sesión por debajo del perfil, plan termina el turno tras la línea de ruta con la orden (`/model opus`); y si al aprobar el plan la Ejecución pide un modelo mayor que el de la sesión, no implementa hasta el siguiente mensaje, que es cuando vale el cambio. En S y M no para nunca por el modelo.
+- **El recordatorio de plan mode no amplía el tope**: sugiere Explore en paralelo y un Plan agent, y en perfil S el tope es 0 agentes.
+- **Un solo tope para acotar, explorar e implementar** ([T-5]): un plan que viene de acotar ya no relanza 3 Explore con un tope nuevo. Los Explore van con `model: "sonnet"`: 0 de 184 workflows fijaban el modelo de sus agentes, y heredaban Opus o Fable.
+- **Reglas nuevas `[T-16]` a `[T-21]`**: ultracode activo no es el sí de [T-7]; el presupuesto vale para toda la tarea y no para el turno; una dimensión por agente y sin las pistas del líder; con la conclusión confirmada se para lo que sigue corriendo; lo que sabe el usuario (su hipótesis y su evidencia) va primero; y el perfil sale de señales que se pueden señalar. Las `[T-1]` a `[T-15]` conservan su número.
+- **Las reglas de acotar que solo aplican a B y C** (premio, comprobación descalificante, medición, medido frente a razonado, regla de paro y la salida de una página) pasan a `plugins/desa/references/acotar.md`, que plan lee solo en esas rutas. Una A no paga ese contexto. Los ejemplos de criterios por tipo pasan a un anexo al final de plan.md, para que el flujo, las rutas y los límites queden dentro de lo que se conserva al compactar.
+- **description de plan** con los disparadores que tenía triage (síntomas, decisiones, freno), y que excluye arreglar un error con la causa a la vista si no se pide un plan.
+
+### Added
+
+- **Hooks `PreToolUse` en el frontmatter de `/desa:plan`**: desde que se invoca y hasta el final de la sesión, cada Workflow pide confirmación, y también cada agente a partir del cuarto de la sesión, en cualquier modo de permisos y con ultracode activo. `Agent` sale de su `allowed-tools`. Con triage ya creado hubo cuatro sesiones en que se reconoció haberse saltado [T-7]; el sí escrito en prosa no bastaba.
+- **Evals** `plan-ruta-a` (antes `triage-tipo-a`) y `plan-sintoma-acota`. Los que comprueban que no se lanzan agentes listan `Agent` en `allowed_tools`, porque sin la herramienta el grader no puede fallar.
+- **`tests/test_frontmatter.py`**: el frontmatter de cada command tiene que ser YAML válido, sin `: ` ni ` #` en un escalar sin comillas, los hooks de plan tienen que devolver `ask` (el de agentes, desde el cuarto y por sesión, en sh, bash y zsh). `claude plugin validate --strict` no lo detecta, y un frontmatter que no parsea pierde `allowed-tools` y los hooks sin avisar: le pasó al primer borrador de esta description.
+
+### Removed
+
+- **`/desa:triage`**: todo va por `/desa:plan`, también el freno a mitad de una tarea. Las memorias de otros repos que citan «/desa:triage» o «[T-1] de /desa:triage» siguen valiendo por los números: los `[T-N]` no cambian.
+
+### Notes
+
+- Lo que más reduce el gasto no lo puede hacer el plugin: apagar ultracode cuando no se quiere orquestar (`/effort ultracode off`, o el interruptor del selector de esfuerzo en el escritorio) y escribir `ultracode` en el prompt cuando sí.
+- El hook no está en `hooks/hooks.json` del plugin, que lo activaría siempre y para todo el equipo: queda para decidirlo.
+- Los evals nuevos no se han ejecutado: la versión de `claude` del PATH (2.1.236) no tiene `plugin eval`.
+
 ## [1.18.2] — 2026-09-29
 
 Correcciones de la ronda de verificación acotada al diff de la 1.18.1. Las tres son de gravedad baja y van por el lado seguro: `CONEXIONES_REALES` marcaba de más, así que review dejaba de ejecutar sola tests que sí eran seguros.

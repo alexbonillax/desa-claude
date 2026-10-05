@@ -35,8 +35,7 @@ Y luego, en Claude Code: `/plugin install desa@desa`.
 
 | Skill | Para qué | Escribe fuera del chat | El modelo la puede lanzar solo |
 |---|---|---|---|
-| `/desa:triage` | Acotar una tarea antes de trabajarla | No. Solo lee y mide, y confirma las mediciones que no son locales | Sí |
-| `/desa:plan` | Planificar en plan mode con los criterios de review | No. El plan se aprueba antes de implementar | Sí |
+| `/desa:plan` | Acotar y planificar en plan mode con los criterios de review, y decir con qué modelo y esfuerzo ejecutarlo | No. Mide, confirma las mediciones que no son locales y el plan se aprueba antes de implementar | Sí |
 | `/desa:review` | Revisar cambios antes de commit o PR, ejecutar los tests y generar los que falten | Sí: tests nuevos, en staging y sin commit | Sí |
 | `/desa:wiki` | Consultar y documentar la wiki interna | Sí: páginas de la wiki, con vista previa y confirmación | Sí |
 | `/desa:translations` | Terms de traducción y ficheros de idioma | Sí: API de terms y ficheros locales, con dry-run y confirmación | Sí |
@@ -45,22 +44,28 @@ Y luego, en Claude Code: `/plugin install desa@desa`.
 
 «El modelo la puede lanzar solo» significa que Claude puede invocarla sin que escribas el comando, p. ej. porque lo pide el `CLAUDE.md` de un proyecto. Salvo que tengas una regla `allow` para esa skill, Claude Code pide permiso antes.
 
-### /desa:triage
-
-Primera skill de una sesión cuando la tarea es un síntoma («va lento», «falla a veces») o una decisión («¿merece la pena?»). Dimensiona el premio, responde primero la pregunta que haría irrelevante el resto y declara el presupuesto antes de gastarlo. Termina en un veredicto y, si procede, con la invocación de `/desa:plan` lista para pegar.
-
-```
-/desa:triage el listado de pedidos tarda 4 s
-/desa:triage ¿merece la pena cachear los precios por cliente?
-```
-
 ### /desa:plan
 
-Convierte una tarea acotada en un plan: explora el código, inventaría lo que se puede reusar, lo contrasta con los criterios de `/desa:review` y termina en plan mode para que lo apruebes antes de implementar. Detecta backend, monorepo (web y mobile) y websites.
+Convierte una petición en un plan: explora el código, inventaría lo que se puede reusar, lo contrasta con los criterios de `/desa:review` y termina en plan mode para que lo apruebes antes de implementar. Detecta backend, monorepo (web y mobile) y websites.
+
+Antes de nada clasifica la petición y lo dice en una línea (`**Ruta A · Perfil S**`):
+
+- **A, alcance claro**: va directa al plan, sin ceremonia y con 0 agentes por defecto.
+- **B, síntoma** («va lento», «falla a veces») y **C, decisión** («¿merece la pena?»): antes de planificar, la acota. Dimensiona el premio, responde primero la pregunta que haría irrelevante el resto, declara el presupuesto antes de gastarlo y mide sin restar. Si no merece la pena, cierra con una página y sin plan; si la merece, sigue al plan en la misma invocación. Es lo que hacía `/desa:triage`, con las mismas reglas `[T-N]`, que están en `plugins/desa/references/acotar.md`.
+- **Pull** de la rama de otro: no planifica, propone `/desa:review` del diff.
+- **Freno**: si le pides que mire el trabajo en curso («¿te estás pasando?»), para lo que sobra y vuelve a dimensionar lo que queda.
+
+El perfil (S, M, L o XL) sale de señales de la petición y fija el tope de agentes de toda la tarea y con qué conviene implementar: Sonnet 5.5 en S y M, Opus 5.5 · xhigh en L y XL, y Workflow solo en XL y con tu sí. La skill no puede cambiar el modelo ni el esfuerzo de tu sesión, así que, si no encajan, el plan te da la orden (`/model sonnet`, `/effort xhigh`, `/effort ultracode off`).
+
+Desde que se invoca y hasta el final de la sesión, Claude Code te pide confirmación antes de cada Workflow y a partir del cuarto agente, también en auto mode y con ultracode activo (ver «Hooks»).
 
 ```
 /desa:plan añadir el filtro por región al listado de expediciones
+/desa:plan el listado de pedidos tarda 4 s
+/desa:plan ¿merece la pena cachear los precios por cliente?
 ```
+
+`/desa:triage` ya no existe: desde la 1.19.0 todo va por `/desa:plan`.
 
 ### /desa:review
 
@@ -128,9 +133,13 @@ Para guardarlo la primera vez sin pegarlo en el chat, copia el token y ejecuta e
   - La lectura de los ficheros de `references/` que usa cada skill, como `Read(/${CLAUDE_PLUGIN_ROOT}/references/ortografia.md)`: la doble barra que queda al sustituir la variable es la forma de las reglas para una ruta absoluta.
   - Las lecturas de los clientes de la API: `desa_api.py token-status`, `workdir` y `GET:*` (el cliente solo admite las rutas de la wiki y de terms), y los subcomandos de `terms.py` que no escriben ni ejecutan PHP (`project`, `locales`, `find`, `search` y `sync` sin `--apply`, este como orden exacta). Nunca un prefijo que admita `POST`, `DELETE`, `--apply` o `--allow-php`. Un GET no significa «sin efectos» en cualquier API: por eso el cliente limita las rutas.
 
+### Hooks
+
+`/desa:plan` declara en su frontmatter dos hooks `PreToolUse` que devuelven `ask`: uno sobre `Workflow`, siempre, y otro sobre `Agent`, a partir del cuarto agente de la sesión (cuenta por `session_id` en un fichero de `$TMPDIR`). Claude Code los registra al invocar la skill y los mantiene el resto de la sesión, y `ask` pide confirmación en cualquier modo de permisos. Es la versión mecánica de `[T-7]` y `[T-16]`: con ultracode activo, el sí escrito en la skill no bastaba. Por lo mismo, plan ya no preaprueba `Agent` en `allowed-tools`. Si ya has dicho que sí en el chat, la confirmación se repite. No se ha puesto en `hooks/hooks.json` del plugin, que lo activaría siempre y para todo el equipo aunque nadie invoque la skill: eso es una decisión del equipo.
+
 ### Criterios de review
 
-Los criterios de `/desa:review`, que también usa `/desa:plan`, están en `plugins/desa/references/criterios-{compartidos,backend,frontend,mobile,websites}.md`, y cada skill carga solo los del tipo de proyecto que toca. Los números `#N` los citan los informes, los planes y las PRs de otros repos, así que no se renumeran nunca: un criterio nuevo va al final de su fichero con el siguiente número libre, y uno retirado se queda marcado como «(retirado)». Un criterio de websites marcado `(= #N)` es gemelo de uno del monorepo: si se cambia uno, se cambia el otro.
+Los criterios de `/desa:review`, que también usa `/desa:plan`, están en `plugins/desa/references/criterios-{compartidos,backend,frontend,mobile,websites}.md`, y cada skill carga solo los del tipo de proyecto que toca. Los números `#N` los citan los informes, los planes y las PRs de otros repos, así que no se renumeran nunca: un criterio nuevo va al final de su fichero con el siguiente número libre, y uno retirado se queda marcado como «(retirado)». Un criterio de websites marcado `(= #N)` es gemelo de uno del monorepo: si se cambia uno, se cambia el otro. Las reglas `[T-N]` de `/desa:plan` y `references/acotar.md` siguen la misma norma: no se renumeran, y las nuevas van con el siguiente número libre (el siguiente es `[T-22]`).
 
 La tabla de ortografía de `/desa:wiki` y `/desa:translations` está en `plugins/desa/references/ortografia.md`.
 
@@ -148,6 +157,6 @@ bash tests/test-context.test.sh
 python3 -m unittest discover -s tests
 ```
 
-`.github/workflows/ci.yml` las ejecuta en cada PR, junto con `claude plugin validate --strict`, la comprobación de que ha subido la versión y un aviso si alguna skill preaprueba intérpretes, red o git completos.
+`tests/test_frontmatter.py` comprueba además que el frontmatter de cada command es YAML válido, porque `claude plugin validate` no lo detecta. `.github/workflows/ci.yml` las ejecuta en cada PR, junto con `claude plugin validate --strict`, la comprobación de que ha subido la versión y un aviso si alguna skill preaprueba intérpretes, red o git completos.
 
 Los evals de comportamiento de las skills están en `plugins/desa/evals/` (ver su README).
