@@ -127,6 +127,10 @@ Rellena el detalle de las tarjetas de Week To Do para que se puedan empezar sin 
   - reescribe la descripción con objetivo, alcance, criterios de aceptación, dónde se toca (mirando el código de los repos de Grupo Desa a mano), riesgos y dudas, y conserva literal el texto original;
   - pone la etiqueta de complejidad, de `C1 · Trivial` a `C5 · Épica`;
   - comenta qué ha cambiado.
+- **Si falta contexto** para saber qué se pide (sin descripción y con más de una lectura, o pendiente de una decisión de negocio), no especula:
+  - no toca la descripción ni pone complejidad;
+  - le pone la etiqueta `Requiere más contexto` (roja oscura) y un comentario con las preguntas concretas;
+  - cuando se añade el contexto, la siguiente pasada la refina, la clasifica y quita la etiqueta.
 - **Qué señala sin tocar**: las tarjetas sin responsable, las paradas más de 30 días, las C5 que hay que partir, las bloqueadas sin motivo y los posibles duplicados.
 - **Qué no hace nunca**: mover, archivar ni asignar.
 - **Se puede repetir cada día**: se salta las tarjetas ya refinadas que no han cambiado, así que está pensada para una tarea programada.
@@ -156,7 +160,7 @@ El procedimiento, las reglas, los IDs y las plantillas están en `plugins/desa/r
 **Requisitos**:
 
 - **Conector**: el conector de Trello de claude.ai, que cada uno conecta en claude.ai, Ajustes > Conectores, con la cuenta que tiene acceso al tablero. Sin conector, Claude avisa una vez y deja trabajar sin Trello.
-- **Etiquetas**: las cinco de complejidad (`C1 · Trivial` … `C5 · Épica`) se crean a mano en el tablero, porque el conector no puede crear etiquetas.
+- **Etiquetas**: las cinco de complejidad (`C1 · Trivial` … `C5 · Épica`) y `Requiere más contexto` se crean a mano en el tablero, porque el conector no puede crear etiquetas. Ya están creadas.
 - **Responsables**: el conector tampoco asigna personas, así que una tarjeta creada en una sesión sale sin responsable, y Claude da el enlace para asignarla.
 
 ## Token de la API (wiki y translations)
