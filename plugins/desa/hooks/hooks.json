@@ -1,0 +1,32 @@
+{
+  "description": "Recordatorio de la sesión de Trello (references/trello.md) en los repos de Grupo Desa: al empezar la sesión y tras cada commit",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/trello-recordatorio.sh\" inicio"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/trello-recordatorio.sh\" commit",
+            "if": "Bash(git commit:*)"
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/trello-recordatorio.sh\" commit",
+            "if": "Bash(git -C * commit *)"
+          }
+        ]
+      }
+    ]
+  }
+}

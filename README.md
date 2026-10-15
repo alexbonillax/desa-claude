@@ -41,6 +41,7 @@ Y luego, en Claude Code: `/plugin install desa@desa`.
 | `/desa:translations` | Terms de traducción y ficheros de idioma | Sí: API de terms y ficheros locales, con dry-run y confirmación | Sí |
 | `/desa:update` | Actualizar este plugin | Sí: el plugin instalado | No |
 | `/desa:magic-factorial` | Fichajes en Factorial | Sí: el registro de jornada en Factorial | Sí |
+| `/desa:trello-planning` | Detallar y clasificar por complejidad las tarjetas de Week To Do, también como rutina | Sí: descripción, etiqueta de complejidad y comentario de cada tarjeta, sin confirmación | Sí |
 
 «El modelo la puede lanzar solo» significa que Claude puede invocarla sin que escribas el comando, p. ej. porque lo pide el `CLAUDE.md` de un proyecto. Salvo que tengas una regla `allow` para esa skill, Claude Code pide permiso antes.
 
@@ -113,6 +114,51 @@ Ver «Actualización».
 
 Crea, corrige y cuadra fichajes en Factorial usando la API interna de Factorial con las cookies de sesión del navegador. Escribe en el registro oficial de jornada.
 
+### /desa:trello-planning
+
+Rellena el detalle de las tarjetas de Week To Do para que se puedan empezar sin preguntar.
+
+```
+/desa:trello-planning                                  # todas las de Week To Do
+/desa:trello-planning https://trello.com/c/R9ae1d52    # solo esa, de cualquier lista
+```
+
+- **Qué escribe**:
+  - reescribe la descripción con objetivo, alcance, criterios de aceptación, dónde se toca (mirando el código de los repos de Grupo Desa a mano), riesgos y dudas, y conserva literal el texto original;
+  - pone la etiqueta de complejidad, de `C1 · Trivial` a `C5 · Épica`;
+  - comenta qué ha cambiado.
+- **Qué señala sin tocar**: las tarjetas sin responsable, las paradas más de 30 días, las C5 que hay que partir, las bloqueadas sin motivo y los posibles duplicados.
+- **Qué no hace nunca**: mover, archivar ni asignar.
+- **Se puede repetir cada día**: se salta las tarjetas ya refinadas que no han cambiado, así que está pensada para una tarea programada.
+
+## Trello en las sesiones
+
+Cada sesión de trabajo en un repo de Grupo Desa va contra una tarjeta, o un ítem de checklist, del tablero [Desarrollo Interno](https://trello.com/b/OomXKfpS/desarrollo-interno). **No hay que invocar nada**:
+
+- el hook del plugin (ver «Hooks») se lo pide a Claude al empezar la sesión y tras cada commit;
+- `/desa:plan` anota la tarjeta en la Ejecución del plan y la crea o la mueve al aprobarlo.
+
+Qué hace:
+
+- **Al empezar**:
+  - busca la tarjeta o el ítem que corresponde al trabajo, y pregunta si hay varias candidatas;
+  - si no hay ninguna, la crea en Doing (o un ítem en una tarjeta paraguas) y avisa;
+  - pasa a Doing lo que estaba en Backlog o Week To Do, y avisa antes si ya tienes 3 tarjetas en Doing.
+- **Al terminar**:
+  - propone el comentario de cierre (qué cambia, commits, verificación), el checklist «Pendiente en producción» con los pasos manuales y el movimiento, y espera tu sí;
+  - quien no valida deja la tarjeta en To Validate;
+  - Alex elige entre To Validate y Done, con una propuesta según si ya está validado en la sesión.
+- **Las tarjetas nunca retroceden**, y lo que está en Done no se reabre: va en una tarjeta nueva.
+- Mientras la sesión está vinculada, los commits llevan la línea `Trello: https://trello.com/c/…`.
+
+El procedimiento, las reglas, los IDs y las plantillas están en `plugins/desa/references/trello.md`.
+
+**Requisitos**:
+
+- **Conector**: el conector de Trello de claude.ai, que cada uno conecta en claude.ai, Ajustes > Conectores, con la cuenta que tiene acceso al tablero. Sin conector, Claude avisa una vez y deja trabajar sin Trello.
+- **Etiquetas**: las cinco de complejidad (`C1 · Trivial` … `C5 · Épica`) se crean a mano en el tablero, porque el conector no puede crear etiquetas.
+- **Responsables**: el conector tampoco asigna personas, así que una tarjeta creada en una sesión sale sin responsable, y Claude da el enlace para asignarla.
+
 ## Token de la API (wiki y translations)
 
 Las dos skills usan el mismo token de `api2.grupodesa.app`, y lo lee `scripts/desa_api.py`, que no lo imprime nunca ni lo pone en ningún comando. Lo busca en este orden: la variable `DESA_API_TOKEN`, `~/.config/desa/api-token` y las claves `desa_api_token` o `desa_wiki_token` de `~/.claude/settings.json`. Si ya lo tenías en `desa_wiki_token`, no hay que hacer nada.
@@ -137,11 +183,18 @@ Para guardarlo la primera vez sin pegarlo en el chat, copia el token y ejecuta e
 
 `/desa:plan` declara en su frontmatter dos hooks `PreToolUse` que devuelven `ask`: uno sobre `Workflow`, siempre, y otro sobre `Agent`, a partir del cuarto agente de la sesión (cuenta por `session_id` en un fichero de `$TMPDIR`). Claude Code los registra al invocar la skill y los mantiene el resto de la sesión, y `ask` pide confirmación en cualquier modo de permisos. Es la versión mecánica de `[T-7]` y `[T-16]`: con ultracode activo, el sí escrito en la skill no bastaba. Por lo mismo, plan ya no preaprueba `Agent` en `allowed-tools`. Si ya has dicho que sí en el chat, la confirmación se repite. No se ha puesto en `hooks/hooks.json` del plugin, que lo activaría siempre y para todo el equipo aunque nadie invoque la skill: eso es una decisión del equipo.
 
+`plugins/desa/hooks/hooks.json` sí existe desde la 1.20.0, y solo para Trello en las sesiones, que se decidió para todo el equipo:
+
+- **Al empezar la sesión** (`SessionStart`): añade al contexto que la sesión va contra una tarjeta del tablero y que, antes de la primera edición, hay que seguir «Sesión › Vincular» de `references/trello.md`, con su ruta absoluta.
+- **Tras cada `git commit`** (`PostToolUse` con `if`): recuerda seguir «Sesión › Cerrar» si el commit termina el trabajo.
+
+Los dos llaman a `hooks/trello-recordatorio.sh`, que no dice nada salvo que el remote `origin` del proyecto se llame `grupodesa-*` o `desa-*`: en cualquier otro repo, o fuera de git, es como si no estuviera. No piden permiso ni bloquean nada.
+
 ### Criterios de review
 
 Los criterios de `/desa:review`, que también usa `/desa:plan`, están en `plugins/desa/references/criterios-{compartidos,backend,frontend,mobile,websites}.md`, y cada skill carga solo los del tipo de proyecto que toca. Los números `#N` los citan los informes, los planes y las PRs de otros repos, así que no se renumeran nunca: un criterio nuevo va al final de su fichero con el siguiente número libre, y uno retirado se queda marcado como «(retirado)». Un criterio de websites marcado `(= #N)` es gemelo de uno del monorepo: si se cambia uno, se cambia el otro. Las reglas `[T-N]` de `/desa:plan` y `references/acotar.md` siguen la misma norma: no se renumeran, y las nuevas van con el siguiente número libre (el siguiente es `[T-22]`).
 
-La tabla de ortografía de `/desa:wiki` y `/desa:translations` está en `plugins/desa/references/ortografia.md`.
+La tabla de ortografía de `/desa:wiki`, `/desa:translations`, `/desa:trello-planning` y las sesiones de Trello está en `plugins/desa/references/ortografia.md`.
 
 ### Versiones y CHANGELOG
 
