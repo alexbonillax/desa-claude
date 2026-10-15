@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - «Trampas del conector» de `references/trello.md` pide ahora escribir en serie.
   - Ante un 429, se espera hasta el `retry-after` y se reintenta una vez; si vuelve a fallar, se anota como error y se sigue.
   - Lo cita el paso de escritura de `/desa:trello-planning` y vale también para las sesiones.
+- **Las tarjetas que se crean o pasan a Doing en una sesión ya tienen responsable.** El conector no puede asignar personas (Trello rechaza `add_member`), así que #2213 llegó a Done sin responsable.
+  - Ahora lo hace una regla de Butler del tablero: `when a card is added to list "Doing" by anyone, add member {username} to the card`.
+  - «Sesión › Vincular» relee la tarjeta y, si la regla no ha asignado a nadie, lo dice.
 
 ## [1.21.0] — 2026-10-15
 

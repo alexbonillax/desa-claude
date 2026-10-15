@@ -161,7 +161,7 @@ El procedimiento, las reglas, los IDs y las plantillas están en `plugins/desa/r
 
 - **Conector**: el conector de Trello de claude.ai, que cada uno conecta en claude.ai, Ajustes > Conectores, con la cuenta que tiene acceso al tablero. Sin conector, Claude avisa una vez y deja trabajar sin Trello.
 - **Etiquetas**: las cinco de complejidad (`C1 · Trivial` … `C5 · Épica`) y `Requiere más contexto` se crean a mano en el tablero, porque el conector no puede crear etiquetas. Ya están creadas.
-- **Responsables**: el conector tampoco asigna personas, así que una tarjeta creada en una sesión sale sin responsable, y Claude da el enlace para asignarla.
+- **Responsables**: el conector tampoco asigna personas. Lo hace una regla de Butler del tablero (Automatización › Reglas): `when a card is added to list "Doing" by anyone, add member {username} to the card`, que asigna a quien crea una tarjeta en Doing o la pasa a Doing. Si tras crearla o moverla sigue sin responsable, Claude lo dice y da el enlace.
 
 ## Token de la API (wiki y translations)
 
