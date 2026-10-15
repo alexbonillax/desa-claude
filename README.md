@@ -186,7 +186,7 @@ Para guardarlo la primera vez sin pegarlo en el chat, copia el token y ejecuta e
 `plugins/desa/hooks/hooks.json` sí existe desde la 1.20.0, y solo para Trello en las sesiones, que se decidió para todo el equipo:
 
 - **Al empezar la sesión** (`SessionStart`): añade al contexto que la sesión va contra una tarjeta del tablero y que, antes de la primera edición, hay que seguir «Sesión › Vincular» de `references/trello.md`, con su ruta absoluta.
-- **Tras cada `git commit`** (`PostToolUse` con `if`): recuerda seguir «Sesión › Cerrar» si el commit termina el trabajo.
+- **Tras cada `git commit`** (`PostToolUse` con `if`): recuerda seguir «Sesión › Cerrar» si el commit termina el trabajo. El `if` no basta, porque con órdenes que Claude Code no sabe analizar (un `for`) el hook salta igual, así que el script comprueba además que la orden lleva un `git commit`.
 
 Los dos llaman a `hooks/trello-recordatorio.sh`, que no dice nada salvo que el remote `origin` del proyecto se llame `grupodesa-*` o `desa-*`: en cualquier otro repo, o fuera de git, es como si no estuviera. No piden permiso ni bloquean nada.
 

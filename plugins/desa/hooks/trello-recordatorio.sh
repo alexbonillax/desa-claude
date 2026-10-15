@@ -19,6 +19,10 @@ case "$1" in
     texto="Proyecto de Grupo Desa: cada sesión de trabajo va contra una tarjeta del tablero Desarrollo Interno de Trello, sin que nadie invoque nada. Antes de la primera edición de una petición de trabajo, lee $referencia y sigue «Sesión › Vincular» (no hace falta en preguntas o exploración sin cambios; con /desa:plan, como dice plan). Al terminar ese trabajo, «Sesión › Cerrar»."
     ;;
   commit)
+    # El "if" de hooks.json no basta: con órdenes que Claude Code no sabe analizar (un for, p. ej.) el hook salta igual.
+    python3 -c 'import json, re, sys
+orden = json.load(sys.stdin).get("tool_input", {}).get("command", "")
+sys.exit(0 if re.search(r"(^|[;&|(\s])git\s+(-C\s+\S+\s+)?commit\b", orden) else 1)' 2>/dev/null || exit 0
     evento=PostToolUse
     texto="Commit hecho en un proyecto de Grupo Desa: si con él termina el trabajo de la tarjeta de Trello vinculada a la sesión, sigue «Sesión › Cerrar» de $referencia."
     ;;
