@@ -48,6 +48,11 @@ Trampas del conector:
   - Una tarjeta creada desde aquí sale sin responsable: dar el enlace para que el usuario se la asigne.
   - Las etiquetas de complejidad las crea Alex a mano (ver «Complejidad»).
 - Las fechas vienen en UTC. Al enseñarlas, pasarlas a Europe/Madrid.
+- **Trello limita las peticiones** y devuelve un 429 con `retry-after` si llegan demasiadas seguidas.
+  - Las escrituras van de una en una, nunca en paralelo. Las lecturas sí pueden ir en paralelo.
+  - Con un 429, esperar hasta la hora del `retry-after` (unos segundos) y reintentar esa escritura una vez.
+  - Si vuelve a fallar, anotarla como error y seguir con la siguiente.
+  - Precedente: en la primera pasada de `/desa:trello-planning` (octubre de 2026) se lanzaron 12 escrituras en paralelo y dos devolvieron un 429.
 
 ## Reglas del kanban
 
