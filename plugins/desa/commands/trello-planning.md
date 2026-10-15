@@ -45,7 +45,7 @@ Según `$ARGUMENTS`:
    - Si ya había uno y desde entonces no hay descripción ni comentarios nuevos de una persona, no se escribe nada: la actividad era de la propia skill o de algo que no aporta contexto (una etiqueta, un movimiento).
    - Pasar a la siguiente tarjeta.
 5. **Clasificar** con la escala de la referencia. En la duda entre dos niveles, el mayor, con el motivo en una línea.
-6. **Escribir**, sin pedir confirmación porque está pensada para la rutina, y tras revisar la ortografía con `${CLAUDE_PLUGIN_ROOT}/references/ortografia.md`:
+6. **Escribir**, sin pedir confirmación porque está pensada para la rutina, tras revisar la ortografía con `${CLAUDE_PLUGIN_ROOT}/references/ortografia.md`, y de una en una, con el reintento ante un 429 de «Trampas del conector» en la referencia (también en el paso 4):
    1. `trelloWriteCard` `update` con la descripción según la plantilla y el texto original literal al final;
    2. `attach_label` con la etiqueta de complejidad, y `detach_label` de la anterior si tenía otra distinta y de `Requiere más contexto` si la tenía;
    3. `add_comment`, que empieza por «Refinada por Claude» y dice qué secciones se han añadido, la complejidad y su motivo, las dudas abiertas y los avisos.

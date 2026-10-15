@@ -45,9 +45,16 @@ Trampas del conector:
 
 - Las escrituras piden el ARI (`id`), nunca la URL: leer antes la tarjeta con `get`.
 - **No puede asignar personas a una tarjeta ni crear etiquetas.**
-  - Una tarjeta creada desde aquí sale sin responsable: dar el enlace para que el usuario se la asigne.
+  - **El responsable lo pone una regla de Butler del tablero** (Automatización › Reglas): `when a card is added to list "Doing" by anyone, add member {username} to the card`. Así queda asignado quien crea una tarjeta en Doing o quien la pasa a Doing, sea una sesión o una persona.
+  - Butler va unos segundos por detrás. Después de crear o mover una tarjeta a Doing, releerla con `get`: si el usuario sigue sin estar en `members`, la regla no está o ha fallado. Decirlo y dar el enlace para que se la asigne.
+  - Precedente: #2213 (octubre de 2026) se creó desde una sesión, se cerró y llegó a Done sin responsable.
   - Las etiquetas de complejidad las crea Alex a mano (ver «Complejidad»).
 - Las fechas vienen en UTC. Al enseñarlas, pasarlas a Europe/Madrid.
+- **Trello limita las peticiones** y devuelve un 429 con `retry-after` si llegan demasiadas seguidas.
+  - Las escrituras van de una en una, nunca en paralelo. Las lecturas sí pueden ir en paralelo.
+  - Con un 429, esperar hasta la hora del `retry-after` (unos segundos) y reintentar esa escritura una vez.
+  - Si vuelve a fallar, anotarla como error y seguir con la siguiente.
+  - Precedente: en la primera pasada de `/desa:trello-planning` (octubre de 2026) se lanzaron 12 escrituras en paralelo y dos devolvieron un 429.
 
 ## Reglas del kanban
 
@@ -95,11 +102,11 @@ Antes de la primera edición de una petición de trabajo. Si la sesión ya está
    - **Coincide con una tarjeta en Done o archivada**: no se reabre. Tarjeta nueva, con el enlace a la anterior en la descripción.
    - **Nada**: crear y avisar en el mismo mensaje, sin preguntar antes.
      - Si el trabajo encaja claramente en una tarjeta paraguas, un ítem en su checklist (`trelloWriteChecklist` `add_item`).
-     - Si no, una tarjeta en Doing (`trelloWriteCard` `create`, `listId` de Doing, `pos` `top`), con el nombre según «Textos» y una descripción de dos a cuatro líneas: el objetivo y lo que se sabe. Dar el enlace para que el usuario se la asigne.
+     - Si no, una tarjeta en Doing (`trelloWriteCard` `create`, `listId` de Doing, `pos` `top`), con el nombre según «Textos» y una descripción de dos a cuatro líneas: el objetivo y lo que se sabe. El responsable lo pone la regla de Butler: comprobarlo como dice «Trampas del conector».
 6. **Mover hacia delante**: si la tarjeta (o la tarjeta paraguas del ítem) está en Backlog o Week To Do, pasa a Doing.
    - Si la tarjeta tiene «Requiere más contexto», avisar y preguntar antes de moverla.
    - Antes, contar las tarjetas de Doing que tienen al usuario en `members`. Con tres o más, AskUserQuestion con sus nombres: «Tienes 3 en Doing. ¿Muevo esta igualmente?», con las opciones «Mover a Doing» y «Dejarla donde está».
-   - Si no, `trelloWriteCard` `move` a Doing y decirlo.
+   - Si no, `trelloWriteCard` `move` a Doing y decirlo. La regla de Butler asigna a quien la mueve; comprobarlo como al crear.
    - En Doing o To Validate no se mueve.
 7. **Dejar el vínculo a la vista**, en una línea que se pueda encontrar tras una compactación:
 

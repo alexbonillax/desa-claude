@@ -5,6 +5,18 @@ All notable changes to the `desa` plugin will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.21.1] — 2026-10-15
+
+### Fixed
+
+- **Las escrituras en Trello van de una en una, y un 429 se reintenta.** Antes, una rutina desatendida podía perder escrituras. En la primera pasada de `/desa:trello-planning` se lanzaron 12 escrituras en paralelo y Trello devolvió un 429 en dos: un comentario y una etiqueta. Hubo que repetirlas a mano.
+  - «Trampas del conector» de `references/trello.md` pide ahora escribir en serie.
+  - Ante un 429, se espera hasta el `retry-after` y se reintenta una vez; si vuelve a fallar, se anota como error y se sigue.
+  - Lo cita el paso de escritura de `/desa:trello-planning` y vale también para las sesiones.
+- **Las tarjetas que se crean o pasan a Doing en una sesión ya tienen responsable.** El conector no puede asignar personas (Trello rechaza `add_member`), así que #2213 llegó a Done sin responsable.
+  - Ahora lo hace una regla de Butler del tablero: `when a card is added to list "Doing" by anyone, add member {username} to the card`.
+  - «Sesión › Vincular» relee la tarjeta y, si la regla no ha asignado a nadie, lo dice.
+
 ## [1.21.0] — 2026-10-15
 
 ### Added
