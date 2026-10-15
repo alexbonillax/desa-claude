@@ -154,6 +154,12 @@ Empezar por Read y Grep: el patrón de referencia del dominio y lo que se puede 
 
 Cada agente devuelve **rutas exactas con números de línea**, no descripciones vagas. Nunca un Workflow para explorar ni para revisar el plan: los A pequeños que lo lanzaron (un scroll, una línea de CSS) tardaron 15-29 min y costaron 3-4 veces más que sus equivalentes en solo, con el mismo resultado.
 
+**Trello**, solo si la sesión trae el recordatorio de Trello del hook del plugin (lo añade en los repos de Grupo Desa):
+- hacer los pasos 1 a 5 de «Sesión › Vincular» de `${CLAUDE_PLUGIN_ROOT}/references/trello.md`, sin escribir nada en Trello;
+- la tarjeta o el ítem va a la Ejecución del plan (Paso 7);
+- crear y mover se hacen al aprobar (Paso 8);
+- si la sesión ya estaba vinculada, la Ejecución lleva esa tarjeta.
+
 ## Paso 4: Borrador del plan
 
 Redactar un borrador, que todavía no se enseña al usuario, con:
@@ -201,6 +207,7 @@ Escribir el plan consolidado en la ruta que el sistema de plan mode haya asignad
 - {modelo · esfuerzo} — {por qué}; coste ~{N}× frente a Sonnet en solo. {si no es el de la sesión: la orden}
 - Agentes: {0 | N y para qué} · Workflow: {no | aprobado: N agentes · ~M min}. Vale hasta terminar la implementación [T-17]
 - Confirmaciones: {coste externo o escritura irreversible, y cuándo se pide el sí | ninguna}
+- Trello: {«nombre» (#N, lista) → Doing al aprobar | ítem «…» de «nombre» | tarjeta nueva en Doing al aprobar}. Solo con el recordatorio de Trello del hook
 
 ## Reuse inventory
 - `file_path:line` — qué función/hook/componente/servicio y cómo se usa
@@ -229,7 +236,7 @@ En perfil S, plantilla corta: Context en una o dos líneas, Ejecución, Reuse in
 
 ## Paso 8: Salir con ExitPlanMode
 
-Llamar a `ExitPlanMode` para que el usuario apruebe antes de implementar. Al aprobar el plan se aprueba también su Ejecución, con el tope de agentes ([T-17]). Si la Ejecución pide un modelo por encima del de la sesión, tras la aprobación no implementar: terminar el turno con la orden para cambiarlo, porque el cambio solo vale desde el siguiente mensaje, y seguir cuando el usuario responda.
+Llamar a `ExitPlanMode` para que el usuario apruebe antes de implementar. Al aprobar el plan se aprueba también su Ejecución, con el tope de agentes ([T-17]) y la línea de Trello: antes de la primera edición, aplicarla con los pasos 5 a 7 de «Sesión › Vincular» (crear avisando, mover a Doing con la comprobación WIP, dejar el vínculo a la vista). Si la Ejecución pide un modelo por encima del de la sesión, tras la aprobación no implementar: terminar el turno con la orden para cambiarlo, porque el cambio solo vale desde el siguiente mensaje, y seguir cuando el usuario responda.
 
 ## Anexo: ejemplos de criterios por tipo
 

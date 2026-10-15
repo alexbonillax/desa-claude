@@ -1,6 +1,6 @@
 # Ortografía del español en la wiki y en las traducciones
 
-La usan `/desa:wiki` y `/desa:translations` antes de cada escritura. Existe porque la wiki llegó a publicar páginas enteras sin tildes («topologia», «configuracion»). Lo que importa es el texto completo con sus tildes: la tabla recoge los errores más frecuentes, pero no es la lista de lo único que hay que revisar.
+La usan `/desa:wiki`, `/desa:translations`, `/desa:trello-planning` y las sesiones de Trello (`references/trello.md`) antes de cada escritura. Existe porque la wiki llegó a publicar páginas enteras sin tildes («topologia», «configuracion»). Lo que importa es el texto completo con sus tildes: la tabla recoge los errores más frecuentes, pero no es la lista de lo único que hay que revisar.
 
 Español de España, sin modismos latinoamericanos.
 

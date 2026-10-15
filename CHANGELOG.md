@@ -5,6 +5,41 @@ All notable changes to the `desa` plugin will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.20.0] — 2026-10-15
+
+Trello entra en el día a día: cada sesión de trabajo va contra una tarjeta del tablero Desarrollo Interno sin invocar nada, y Week To Do se refina sola. Sale de analizar el tablero el 15 de octubre de 2026:
+- el trabajo más activo del mes (la adaptación a compras) seguía en Backlog;
+- dos tarjetas habían pasado a Done con pasos de producción que solo constaban en un comentario (un `ALTER TABLE` de `order_product` y la vista `DW.DIM_PROVINCE`);
+- siete de las nueve tarjetas de Week To Do no tenían responsable, y casi ninguna tenía descripción.
+
+### Added
+
+- **Trello en las sesiones**, sin skill que invocar. El procedimiento está en `references/trello.md` («Sesión»), y lo disparan el hook del plugin y `/desa:plan`.
+  - Al empezar, vincula la sesión a su tarjeta o ítem de checklist. Si no hay tarjeta, la crea en Doing avisando.
+  - Pasa a Doing lo que estaba en Backlog o Week To Do, con aviso a partir de 3 tarjetas en Doing por persona.
+  - Al terminar deja un comentario con lo hecho y un checklist «Pendiente en producción» con los pasos manuales, y mueve con tu sí.
+  - Las tarjetas nunca retroceden, y solo el validador (Alex) pasa de To Validate a Done.
+  - Mientras la sesión está vinculada, los commits llevan la línea `Trello:`.
+- **`/desa:trello-planning`**: rellena el detalle de las tarjetas de Week To Do, o de una tarjeta por URL.
+  - Escribe objetivo, alcance, criterios de aceptación, dónde se toca, riesgos y dudas, conservando el texto original.
+  - Pone una de cinco etiquetas de complejidad (`C1 · Trivial` … `C5 · Épica`), alineadas con los perfiles de `/desa:plan`, y comenta qué ha cambiado.
+  - Es idempotente, para correr como tarea programada.
+- **`references/trello.md`**: IDs del tablero y de las listas, reglas del kanban, procedimiento de sesión, escala de complejidad y plantillas.
+- **`hooks/hooks.json`**, el primer hook a nivel de plugin: al empezar la sesión y tras cada `git commit`, añade al contexto que hay que seguir «Sesión › Vincular» o «Sesión › Cerrar», con la ruta absoluta de la referencia.
+  - Solo habla en repos cuyo remote `origin` se llama `grupodesa-*` o `desa-*`.
+  - No pide permiso ni bloquea nada.
+  - Probado en `tests/test_hooks_trello.py`.
+
+### Changed
+
+- **`/desa:plan`**: con el recordatorio de Trello del hook, busca la tarjeta durante la exploración sin escribir en Trello, la pone en una línea `Trello:` de la Ejecución, y la crea o la mueve a Doing al aprobar el plan.
+
+### Notes
+
+- **El conector de Trello de claude.ai no puede crear etiquetas ni asignar personas a una tarjeta**: las cinco etiquetas de complejidad se crean a mano, y una tarjeta creada en una sesión sale sin responsable.
+- **Las herramientas del conector se nombran por su sufijo** y se cargan con ToolSearch, porque el prefijo `mcp__<id>__` cambia de una cuenta a otra.
+- **No hay evals nuevos**: llamarían al Trello real.
+
 ## [1.19.0] — 2026-10-05
 
 `/desa:triage` se funde en `/desa:plan` y desaparece, y el plan dice con qué modelo, esfuerzo y cuántos agentes ejecutarlo. Sale de revisar 131 sesiones reales: el ~80 % de las peticiones de plan son de alcance claro, y en el ~20 % restante (síntomas y decisiones), sin triage, 6 de 8 lanzaron 7 agentes o más. Pero la mayor parte del exceso de agentes no venía de plan ni de triage: ultracode estaba activo en 82 de 88 sesiones con plan o triage, el 63 % de los agentes se lanzó sin ninguna skill desa activa, y el freno de triage no pasaba al turno siguiente (9 de 13 sesiones con triage tuvieron workflows después).
