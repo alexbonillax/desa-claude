@@ -22,10 +22,24 @@ def repo(base, remote=None):
 
 
 class Recordatorio(unittest.TestCase):
-    def ejecutar(self, remote, modo):
+    def ejecutar(self, remote, modo, orden='git commit -m "x"'):
+        entrada = json.dumps({'tool_name': 'Bash', 'tool_input': {'command': orden}})
         with tempfile.TemporaryDirectory() as tmp:
             env = dict(os.environ, CLAUDE_PROJECT_DIR=str(repo(tmp, remote)))
-            return subprocess.run(['bash', str(SCRIPT), modo], capture_output=True, text=True, env=env, check=True).stdout
+            return subprocess.run(['bash', str(SCRIPT), modo], input=entrada, capture_output=True, text=True, env=env,
+                                  check=True).stdout
+
+    def test_commit_solo_con_un_git_commit_de_verdad(self):
+        remote = 'https://github.com/alexbonillax/grupodesa-front'
+        for orden in ['git commit -m "x"', 'cd /tmp && git add a && git commit -q -F - <<EOF\nx\nEOF',
+                      'git -C /Users/ab/Docker/app/desa-claude commit --amend -F msg']:
+            with self.subTest(orden=orden):
+                self.contexto(self.ejecutar(remote, 'commit', orden), 'PostToolUse')
+        # El for es el caso real que se colaba: Claude Code no lo analiza y el "if" de hooks.json deja pasar el hook.
+        for orden in ["for r in a b; do grep -rn 'camión' \"$r\"; done", 'grep -n "git commit" README.md',
+                      'git log --oneline -3', 'git status --short', '']:
+            with self.subTest(orden=orden):
+                self.assertEqual(self.ejecutar(remote, 'commit', orden), '')
 
     def contexto(self, salida, evento):
         datos = json.loads(salida)['hookSpecificOutput']

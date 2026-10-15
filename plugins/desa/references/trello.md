@@ -66,6 +66,7 @@ Backlog → Week To Do → Doing → To Validate → Done. **Una tarjeta nunca r
   - van en un checklist **«Pendiente en producción»** de la tarjeta, nunca solo en un comentario;
   - antes de proponer Done, mirar si ese checklist tiene ítems abiertos y decirlo.
 - **«Bloqueado»** (etiqueta del tablero) lleva siempre el motivo escrito en un comentario.
+- **«Requiere más contexto»** (ver su sección) espera a que Alex añada contexto: no entra en Doing sin preguntar.
 
 ## Sesión
 
@@ -96,6 +97,7 @@ Antes de la primera edición de una petición de trabajo. Si la sesión ya está
      - Si el trabajo encaja claramente en una tarjeta paraguas, un ítem en su checklist (`trelloWriteChecklist` `add_item`).
      - Si no, una tarjeta en Doing (`trelloWriteCard` `create`, `listId` de Doing, `pos` `top`), con el nombre según «Textos» y una descripción de dos a cuatro líneas: el objetivo y lo que se sabe. Dar el enlace para que el usuario se la asigne.
 6. **Mover hacia delante**: si la tarjeta (o la tarjeta paraguas del ítem) está en Backlog o Week To Do, pasa a Doing.
+   - Si la tarjeta tiene «Requiere más contexto», avisar y preguntar antes de moverla.
    - Antes, contar las tarjetas de Doing que tienen al usuario en `members`. Con tres o más, AskUserQuestion con sus nombres: «Tienes 3 en Doing. ¿Muevo esta igualmente?», con las opciones «Mover a Doing» y «Dejarla donde está».
    - Si no, `trelloWriteCard` `move` a Doing y decirlo.
    - En Doing o To Validate no se mueve.
@@ -159,9 +161,25 @@ Cinco etiquetas, una por tarjeta. Las crea Alex en Trello; si falta alguna, `/de
 | `C2 · Pequeña` | sky | ≤ ½ día, una capa (solo front o solo back) con patrón a la vista | S–M |
 | `C3 · Media` | sky_dark | 1–2 días, back + front o una migración, con patrón existente | M |
 | `C4 · Grande` | blue_dark | 3–5 días, varios módulos, una integración (Spyro, Snowflake, DBT, Fenix) o toca precios o pedidos | L |
-| `C5 · Épica` | black | > 1 semana o alcance incierto: se parte antes de entrar en Doing | XL |
+| `C5 · Épica` | black | > 1 semana, o grande con partes por decidir: se parte antes de entrar en Doing | XL |
 
-Se reconocen por el prefijo `C1 ·` … `C5 ·`, no por el ARI. En la duda entre dos niveles, el mayor, y el motivo en una línea.
+Se reconocen por el prefijo `C1 ·` … `C5 ·`, no por el ARI. En la duda entre dos niveles, el mayor, y el motivo en una línea. Si falta contexto para saber qué se pide, no se clasifica: va «Requiere más contexto».
+
+## Requiere más contexto
+
+Etiqueta `Requiere más contexto`, roja oscura (`red_dark`, para no confundirla con el rojo de «Bloqueado»). Se reconoce por el nombre.
+
+- **Cuándo**: no se puede escribir el objetivo ni los criterios de aceptación sin adivinar.
+  - Ejemplos: sin descripción ni comentarios útiles y con un nombre que admite más de una lectura, o algo que depende de una decisión de negocio que no está en la tarjeta, el tablero ni el código.
+  - Si solo quedan dudas menores, se refina y van a «Dudas abiertas».
+  - Precedente: «Pedido de carga camión» (octubre de 2026) se refinó con dos lecturas y una C5 por alcance incierto. La descripción quedó llena de dudas que solo Alex podía resolver.
+- **Qué se hace**: ni se reescribe la descripción ni se pone complejidad. Se pone la etiqueta y un comentario con las preguntas concretas (formato en «Textos»).
+- **Qué sigue**:
+  1. Alex añade el contexto, en la descripción o en un comentario.
+  2. La siguiente pasada lo detecta porque `lastActivityAt` es posterior a ese comentario, con un minuto de margen, porque las escrituras de la propia skill también lo mueven.
+  3. Entonces refina, clasifica y quita la etiqueta.
+  4. Si el contexto sigue sin bastar, deja un comentario nuevo con lo que falta, sin repetir el anterior.
+- **En una sesión**: una tarjeta con esta etiqueta no debería pasar a Doing. Al vincularla, avisar y preguntar antes de moverla.
 
 ## Textos
 
@@ -202,6 +220,23 @@ _Refinada por Claude · AAAA-MM-DD_
 ```
 
 Una sección sin nada que decir se quita, salvo «Dudas abiertas», que dice «Ninguna» si no hay. En «Dónde se toca» solo rutas vistas en el código; lo que se supone va con «probable».
+
+### Comentario «Requiere más contexto»
+
+Lo deja `/desa:trello-planning` en vez de refinar:
+
+```markdown
+**Requiere más contexto** · Claude · AAAA-MM-DD
+
+Por qué no se ha podido refinar, en una o dos frases. Cuando se añada el contexto, en la descripción o en un comentario, la siguiente pasada la refina, le pone complejidad y quita esta etiqueta.
+
+**Qué falta saber**:
+- Preguntas concretas, que se contesten en una línea cada una.
+
+**Para contestar**: dónde mirar o qué hay ya en el código o en el tablero, si ayuda. (Opcional.)
+
+**Aviso**: sin responsable. (Solo los avisos que haya.)
+```
 
 ### Comentario de cierre
 

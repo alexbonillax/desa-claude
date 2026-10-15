@@ -5,6 +5,25 @@ All notable changes to the `desa` plugin will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.21.0] — 2026-10-15
+
+### Added
+
+- **«Requiere más contexto» en `/desa:trello-planning`**: si una tarjeta no tiene contexto para saber qué se pide, la skill no la refina ni la clasifica.
+  - Casos: sin descripción y con más de una lectura, o algo pendiente de una decisión de negocio.
+  - Lo que hace: le pone la etiqueta `Requiere más contexto` (roja oscura) y un comentario con las preguntas concretas.
+  - Cuando Alex añade el contexto, la siguiente pasada lo detecta por `lastActivityAt`, la refina, la clasifica y quita la etiqueta.
+  - Al vincular una sesión a una tarjeta con esa etiqueta, se avisa antes de pasarla a Doing.
+  - Sale de la primera prueba: «Pedido de carga camión» se refinó con dos lecturas posibles y una C5 «por alcance incierto». La descripción quedó llena de dudas que solo podía resolver quien la creó.
+
+### Changed
+
+- **`C5 · Épica` ya no es «alcance incierto»**: es «> 1 semana, o grande con partes por decidir». La falta de contexto va a «Requiere más contexto».
+
+### Fixed
+
+- **El recordatorio de commit salía tras cualquier orden de Bash** en los repos de Grupo Desa, no solo tras `git commit`. El filtro `"if": "Bash(git commit:*)"` de `hooks/hooks.json` no basta: con una orden que Claude Code no sabe analizar, como un `for`, el hook salta igual. Lo vimos con un `for … grep` en la primera sesión con la 1.20.0. Ahora `hooks/trello-recordatorio.sh commit` lee la orden que llega por la entrada del hook y solo habla si contiene un `git commit` o un `git -C … commit`. Probado en `tests/test_hooks_trello.py`.
+
 ## [1.20.0] — 2026-10-15
 
 Trello entra en el día a día: cada sesión de trabajo va contra una tarjeta del tablero Desarrollo Interno sin invocar nada, y Week To Do se refina sola. Sale de analizar el tablero el 15 de octubre de 2026:
