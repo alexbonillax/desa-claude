@@ -5,6 +5,14 @@ All notable changes to the `desa` plugin will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.21.2] — 2026-10-15
+
+### Fixed
+
+- **Las tarjetas que se crean o vinculan desde una sesión llevan complejidad.** Hasta ahora la ponía solo `/desa:trello-planning` en Week To Do, así que una tarjeta creada desde `/desa:plan` llegaba a Doing sin ella.
+  - «Sesión › Vincular» tiene un paso nuevo, el 7: si la tarjeta no tiene `C1 ·` … `C5 ·` ni «Requiere más contexto», se le pone con la escala de «Complejidad». Si ya tiene una, no se toca.
+  - En `/desa:plan`, la línea `Trello:` de la Ejecución lleva la complejidad que sale del plan, con el perfil como comprobación (S es C1 o C2, M es C2 o C3, L es C4 y XL es C5), y se aplica al aprobar.
+
 ## [1.21.1] — 2026-10-15
 
 ### Fixed

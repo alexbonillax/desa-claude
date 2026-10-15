@@ -83,7 +83,7 @@ Cada sesión de trabajo en un proyecto de Grupo Desa va contra una tarjeta, o un
 
 Existe porque el tablero dejó de reflejar el trabajo real: en octubre de 2026 la adaptación a compras seguía en Backlog con el trabajo a medias en el código, y dos tarjetas pasaron a Done con un `ALTER TABLE` y una vista de Snowflake pendientes que solo constaban en un comentario.
 
-Una pregunta, una revisión o una exploración que no cambia nada no se vincula ni crea tarjetas. Si el usuario pregunta en qué tarjeta está la sesión, se responde con la línea del vínculo (paso 7).
+Una pregunta, una revisión o una exploración que no cambia nada no se vincula ni crea tarjetas. Si el usuario pregunta en qué tarjeta está la sesión, se responde con la línea del vínculo (paso 8).
 
 ### Vincular
 
@@ -108,7 +108,11 @@ Antes de la primera edición de una petición de trabajo. Si la sesión ya está
    - Antes, contar las tarjetas de Doing que tienen al usuario en `members`. Con tres o más, AskUserQuestion con sus nombres: «Tienes 3 en Doing. ¿Muevo esta igualmente?», con las opciones «Mover a Doing» y «Dejarla donde está».
    - Si no, `trelloWriteCard` `move` a Doing y decirlo. La regla de Butler asigna a quien la mueve; comprobarlo como al crear.
    - En Doing o To Validate no se mueve.
-7. **Dejar el vínculo a la vista**, en una línea que se pueda encontrar tras una compactación:
+7. **Complejidad**: si la tarjeta no tiene etiqueta `C1 ·` … `C5 ·` ni «Requiere más contexto», ponérsela (`trelloWriteCard` `attach_label`, con el ARI de `list_labels`). Si ya tiene una, no se toca.
+   - Se clasifica con la escala de «Complejidad», a partir de lo que se sabe del trabajo: ficheros y capas que se tocan, migraciones, integraciones, si toca precios o pedidos.
+   - Con `/desa:plan`, sale del plan, y su perfil sirve de comprobación: S es C1 o C2, M es C2 o C3, L es C4 y XL es C5.
+   - Precedente: en octubre de 2026 las tarjetas creadas desde `/desa:plan` llegaban sin complejidad, que solo ponía `/desa:trello-planning` en Week To Do.
+8. **Dejar el vínculo a la vista**, en una línea que se pueda encontrar tras una compactación:
 
    ```
    Trello: «{nombre}» (#{número}, {lista}) → ítem «{ítem}» · https://trello.com/c/{shortLink}
