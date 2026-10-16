@@ -155,10 +155,20 @@ Tras el commit que termina el trabajo, o cuando el usuario lo da por terminado. 
    4. el movimiento (`move`, `pos` `top`).
 6. **Resumen**: una línea con lo que se ha hecho y el enlace de la tarjeta.
 
+### Pasos pendientes hechos en la sesión
+
+Cuando en la sesión se hace un paso del checklist «Pendiente en producción» de una tarjeta, sea la vinculada o una que se cerró antes en la misma sesión (fusionar una PR, ejecutar `/desa:update`, lanzar un SQL, crear algo en producción):
+
+1. **Comprobar que está hecho** con lo que se ve en la sesión: la PR fusionada (`gh pr view`), la versión instalada que da `/desa:update`, la salida del comando.
+2. **Marcarlo en cuanto esté comprobado**, sin esperar a que lo pidan (`update_item` con `checked`), y decirlo en una línea.
+3. **Si era el último ítem abierto**, proponer el movimiento con la tabla de «Cerrar» (paso 3). Al validador, Done con un comentario de validación. A quien no valida, nada más: la tarjeta ya está en To Validate y la pasa Alex.
+
+Precedente: en octubre de 2026, #2217 se quedó en To Validate con su único paso ya hecho (PR fusionada y `/desa:update` ejecutado en la misma sesión) hasta que Alex lo preguntó.
+
 ### Límites de la sesión
 
 - Solo este tablero.
-- Crear una tarjeta o un ítem y pasar a Doing al empezar van avisando. Comentar, marcar ítems y cualquier movimiento al terminar van con un sí.
+- Crear una tarjeta o un ítem, pasar a Doing al empezar y marcar un paso de «Pendiente en producción» ya comprobado van avisando. Comentar, marcar otros ítems y cualquier movimiento al terminar van con un sí.
 - Nunca mover hacia atrás ni a Week To Do, nunca archivar ni borrar, y nunca reescribir la descripción de una tarjeta: eso es de `/desa:trello-planning`.
 - Si una escritura falla, decirlo con el error y seguir con el trabajo, sin reintentar en bucle.
 

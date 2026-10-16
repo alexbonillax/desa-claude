@@ -5,6 +5,14 @@ All notable changes to the `desa` plugin will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.21.4] — 2026-10-16
+
+### Fixed
+
+- **Los pasos de «Pendiente en producción» se marcan en cuanto se hacen en la sesión.** #2217 se quedó en To Validate con su único paso ya hecho (PR fusionada y `/desa:update` ejecutado en la misma sesión) hasta que Alex lo preguntó.
+  - «Sesión» en `references/trello.md` tiene un apartado nuevo, «Pasos pendientes hechos en la sesión».
+  - Cada paso se comprueba con lo que se ve en la sesión, se marca avisando y, si era el último, se propone el movimiento: Done al validador, con un comentario de validación.
+
 ## [1.21.3] — 2026-10-16
 
 ### Fixed
