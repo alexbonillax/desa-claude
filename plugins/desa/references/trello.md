@@ -109,8 +109,8 @@ Antes de la primera edición de una petición de trabajo. Si la sesión ya está
    - Si no, `trelloWriteCard` `move` a Doing y decirlo. La regla de Butler asigna a quien la mueve; comprobarlo como al crear.
    - En Doing o To Validate no se mueve.
 7. **Complejidad**: si la tarjeta no tiene etiqueta `C1 ·` … `C5 ·` ni «Requiere más contexto», ponérsela (`trelloWriteCard` `attach_label`, con el ARI de `list_labels`). Si ya tiene una, no se toca.
-   - Se clasifica con la escala de «Complejidad», a partir de lo que se sabe del trabajo: ficheros y capas que se tocan, migraciones, integraciones, si toca precios o pedidos.
-   - Con `/desa:plan`, sale del plan, y su perfil sirve de comprobación: S es C1 o C2, M es C2 o C3, L es C4 y XL es C5.
+   - Se clasifica con la escala de «Complejidad», por el tiempo que va a costar a partir de lo que se sabe del trabajo.
+   - Con `/desa:plan`, sale de los archivos y cambios del plan, no de su perfil.
    - Precedente: en octubre de 2026 las tarjetas creadas desde `/desa:plan` llegaban sin complejidad, que solo ponía `/desa:trello-planning` en Week To Do.
 8. **Dejar el vínculo a la vista**, en una línea que se pueda encontrar tras una compactación:
 
@@ -166,15 +166,22 @@ Tras el commit que termina el trabajo, o cuando el usuario lo da por terminado. 
 
 Cinco etiquetas, una por tarjeta. Las crea Alex en Trello; si falta alguna, `/desa:trello-planning` para y dice cuáles faltan.
 
-| Etiqueta | Color | Señal | ≈ perfil de `/desa:plan` |
-|---|---|---|---|
-| `C1 · Trivial` | sky_light | < 1 h, un fichero: texto, CSS, config, un dato | S |
-| `C2 · Pequeña` | sky | ≤ ½ día, una capa (solo front o solo back) con patrón a la vista | S–M |
-| `C3 · Media` | sky_dark | 1–2 días, back + front o una migración, con patrón existente | M |
-| `C4 · Grande` | blue_dark | 3–5 días, varios módulos, una integración (Spyro, Snowflake, DBT, Fenix) o toca precios o pedidos | L |
-| `C5 · Épica` | black | > 1 semana, o grande con partes por decidir: se parte antes de entrar en Doing | XL |
+**La complejidad es el tiempo que va a costar, con la forma de trabajar del equipo (con Claude Code), no el riesgo ni el dominio.**
 
-Se reconocen por el prefijo `C1 ·` … `C5 ·`, no por el ARI. En la duda entre dos niveles, el mayor, y el motivo en una línea. Si falta contexto para saber qué se pide, no se clasifica: va «Requiere más contexto».
+| Etiqueta | Color | Tiempo | Ejemplos |
+|---|---|---|---|
+| `C1 · Trivial` | sky_light | < 1 h | un texto, CSS, una config, un dato |
+| `C2 · Pequeña` | sky | ≤ 1 día | un cambio acotado con patrón a la vista, aunque toque back y front o lleve una migración |
+| `C3 · Media` | sky_dark | 1–2 días | varias piezas nuevas, o un patrón que todavía no existe |
+| `C4 · Grande` | blue_dark | 3–5 días | varios módulos con piezas nuevas, o una integración nueva con un sistema externo |
+| `C5 · Épica` | black | > 1 semana, o grande con partes por decidir | se parte antes de entrar en Doing |
+
+- **Lo que no sube el nivel por sí solo**: tocar compras, precios, pedidos, Spyro, Snowflake o DBT. Eso sube el riesgo, que va en «Riesgos y pasos de despliegue», pero no el tiempo. Una integración nueva sí lo sube; leer un campo más de una que ya existe, no.
+- **En la duda**, el nivel del tiempo más probable, no el mayor, y el motivo en una línea.
+- **El perfil de `/desa:plan` no decide la complejidad**: mide cuánto análisis merece la tarea y su riesgo. Un L puede ser un C2.
+- **Precedente**: en octubre de 2026, «Lead times de proveedor y producto» y «Grupos de producto en los lead times de proveedor» salieron C4 desde `/desa:plan` por tocar compras y varios módulos, y eran de menos de un día.
+
+Se reconocen por el prefijo `C1 ·` … `C5 ·`, no por el ARI. Si falta contexto para saber qué se pide, no se clasifica: va «Requiere más contexto».
 
 ## Requiere más contexto
 

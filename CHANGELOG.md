@@ -5,6 +5,21 @@ All notable changes to the `desa` plugin will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.21.3] — 2026-10-16
+
+### Fixed
+
+- **La escala de complejidad sobrestimaba.** «Lead times de proveedor y producto» y «Grupos de producto en los lead times de proveedor» salieron C4 desde `/desa:plan` y eran de menos de un día. Había tres causas:
+  - bastaba con tocar varios módulos, una integración, precios o pedidos para ser C4;
+  - el perfil L del plan se traducía a C4;
+  - en la duda se elegía el nivel mayor.
+- **Ahora `references/trello.md` clasifica por el tiempo que va a costar**, con la forma de trabajar del equipo:
+  - C2 llega hasta un día (antes, medio día, y quedaba un hueco hasta C3);
+  - el dominio sube el riesgo pero no el nivel;
+  - en la duda se elige el nivel del tiempo más probable;
+  - el perfil de `/desa:plan` ya no decide la complejidad.
+- **Mismo criterio en `/desa:trello-planning`.**
+
 ## [1.21.2] — 2026-10-15
 
 ### Fixed
